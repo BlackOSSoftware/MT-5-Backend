@@ -1300,7 +1300,15 @@ export class Engine {
     );
 
     let bonusDeduct = 0;
-    if (pos.floatingPnL < 0) {
+    const realBalanceExhaustedByLoss =
+      pos.floatingPnL < 0 && account.balance <= 0;
+    if (realBalanceExhaustedByLoss && bonusBalanceBeforeClose > 0) {
+      // A trading loss that exhausts the real balance also exhausts the
+      // remaining promotional credit. This prevents old credit from becoming
+      // usable again after a later deposit.
+      bonusDeduct = bonusBalanceBeforeClose;
+      account.bonus_balance = 0;
+    } else if (pos.floatingPnL < 0) {
       const overflowLoss = Math.max(0, Math.abs(pos.floatingPnL) - realBalanceBeforeClose);
       if (overflowLoss > 0 && bonusBalanceBeforeClose > 0) {
         bonusDeduct = Math.min(bonusBalanceBeforeClose, overflowLoss);
@@ -1324,6 +1332,7 @@ export class Engine {
       swapPerDay: pos.swapPerDay || 0,
       bonusDeduct,
       bonusBalance: account.bonus_balance,
+      realBalanceExhaustedByLoss,
       bonusPercent: Number(account.bonus_percent) || 0,
       closedAt: Date.now(),
     });

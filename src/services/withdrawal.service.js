@@ -92,8 +92,7 @@ const validatePayout = ({ method, payout }) => {
     if (
       !payout.bank_name ||
       !payout.account_holder_name ||
-      !payout.account_number ||
-      !payout.ifsc
+      !payout.account_number
     ) {
       return { ok: false, message: "Complete bank details are required" };
     }

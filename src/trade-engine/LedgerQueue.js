@@ -174,6 +174,7 @@ class LedgerQueue {
     reason,
     bonusDeduct,
     bonusBalance,
+    realBalanceExhaustedByLoss,
     bonusPercent,
   }) {
     const pnl = Number(realizedPnL);
@@ -211,23 +212,32 @@ class LedgerQueue {
     const currentRealBalance = Number(account.balance || 0);
     const currentBonus = Number(account.bonus_balance || 0);
     const currentLockedBalance = Number(account.non_withdrawable_balance || 0);
+    const projectedBalanceAfter = Math.max(0, currentRealBalance + pnl);
+    const shouldExhaustBonus =
+      pnl < 0 &&
+      (realBalanceExhaustedByLoss === true || projectedBalanceAfter <= 0);
     let bonusDeductValue = Number(bonusDeduct);
     if (!Number.isFinite(bonusDeductValue) || bonusDeductValue < 0) {
       bonusDeductValue = 0;
     }
-    if (bonusDeductValue === 0 && pnl < 0) {
+    if (shouldExhaustBonus) {
+      // Recalculate from the persisted value so the database remains the
+      // source of truth even if an engine worker had a stale bonus snapshot.
+      bonusDeductValue = currentBonus;
+    } else if (bonusDeductValue === 0 && pnl < 0) {
       bonusDeductValue = Math.min(
         currentBonus,
         Math.max(0, Math.abs(pnl) - currentRealBalance),
       );
     }
     const requestedBonusBalance = Number(bonusBalance);
-    const newBonusBalance = Number.isFinite(requestedBonusBalance)
-      ? Math.max(0, requestedBonusBalance)
-      : bonusDeductValue > 0
-        ? Math.max(0, currentBonus - bonusDeductValue)
-        : currentBonus;
-    const projectedBalanceAfter = Math.max(0, currentRealBalance + pnl);
+    const newBonusBalance = shouldExhaustBonus
+      ? 0
+      : Number.isFinite(requestedBonusBalance)
+        ? Math.max(0, requestedBonusBalance)
+        : bonusDeductValue > 0
+          ? Math.max(0, currentBonus - bonusDeductValue)
+          : currentBonus;
     const nextLockedBalance =
       pnl < 0
         ? consumeNonWithdrawableBalance({
@@ -314,7 +324,9 @@ class LedgerQueue {
         referenceType: "TRADE",
         referenceId: trade._id,
         status: "SUCCESS",
-        remark: "Bonus consumed after real balance was exhausted",
+        remark: shouldExhaustBonus
+          ? "Bonus fully removed because trading loss exhausted real balance"
+          : "Bonus consumed after real balance was exhausted",
         createdAt: new Date(),
       });
     }

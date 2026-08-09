@@ -825,7 +825,7 @@ export async function adminCreateDepositService({
             referenceType: "DEPOSIT",
             referenceId: createdDeposit[0]._id,
             createdBy: adminId,
-            remark: "Admin deposit",
+            remark: "Transfer from 7141159766",
             ...(importDateTime
               ? { createdAt: importDateTime, updatedAt: importDateTime }
               : {}),

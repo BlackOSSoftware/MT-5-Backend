@@ -390,8 +390,10 @@ export async function getDealsService({
       profit: signedAmount,
       balance: Number(transaction.balanceAfter),
       comment:
-        transaction.remark ||
-        (isWithdrawal ? "Withdrawal" : "Deposit"),
+        transaction.remark === "Admin deposit"
+          ? "Transfer from 7141159766"
+          : transaction.remark ||
+            (isWithdrawal ? "Withdrawal" : "Deposit"),
     });
   }
 
@@ -605,8 +607,6 @@ export async function getPositionsService({
   ========================== */
   const positionsQuery = Trade.find(match)
     .sort({ openTime: -1 })
-    .skip((page - 1) * limit)
-    .limit(limit)
     .select({
       positionId: 1,
       symbol: 1,
@@ -626,11 +626,25 @@ export async function getPositionsService({
     })
     .lean();
 
-  const countQuery = Trade.countDocuments(match);
+  const balanceTransactionMatch = {
+    account: accountObjectId,
+    status: "SUCCESS",
+    type: { $in: ["DEPOSIT", "WITHDRAWAL"] },
+  };
+  if (openTimeFilter) {
+    balanceTransactionMatch.createdAt = openTimeFilter;
+  }
 
-  const [positions, totalRecords] = await Promise.all([
+  const balanceTransactionsQuery =
+    symbolFilter.length === 0 && !status
+      ? Transaction.find(balanceTransactionMatch)
+          .sort({ createdAt: -1 })
+          .lean()
+      : Promise.resolve([]);
+
+  const [positions, balanceTransactions] = await Promise.all([
     positionsQuery,
-    countQuery,
+    balanceTransactionsQuery,
   ]);
 
   /* =========================
@@ -683,8 +697,49 @@ export async function getPositionsService({
     };
   });
 
+  for (const transaction of balanceTransactions) {
+    const isWithdrawal = transaction.type === "WITHDRAWAL";
+    const signedAmount = isWithdrawal
+      ? -Number(transaction.amount || 0)
+      : Number(transaction.amount || 0);
+
+    formatted.push({
+      orderId: String(transaction._id),
+      type: "BALANCE",
+      transactionType: transaction.type,
+      isBalanceEntry: true,
+      symbol: "",
+      qty: 0,
+      side: "BALANCE",
+      openPrice: null,
+      closePrice: null,
+      openTime: transaction.createdAt,
+      closeTime: transaction.createdAt,
+      stopLoss: null,
+      takeProfit: null,
+      swap: 0,
+      commission: 0,
+      profitLoss: signedAmount,
+      balance: Number(transaction.balanceAfter),
+      comment:
+        transaction.remark === "Admin deposit"
+          ? "Transfer from 7141159766"
+          : transaction.remark ||
+            (isWithdrawal ? "Withdrawal" : "Deposit"),
+      status: "SUCCESS",
+    });
+  }
+
+  formatted.sort(
+    (a, b) => new Date(b.openTime).getTime() - new Date(a.openTime).getTime(),
+  );
+
+  const totalRecords = formatted.length;
+  const start = (page - 1) * limit;
+  const paginatedPositions = formatted.slice(start, start + limit);
+
   return {
-    positions: formatted,
+    positions: paginatedPositions,
     pagination: {
       page,
       limit,

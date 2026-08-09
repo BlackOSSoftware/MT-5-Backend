@@ -52,8 +52,7 @@ export async function createPaymentMethodService(userId, body) {
     if (
       !body.bank_name ||
       !body.account_name ||
-      !body.account_number ||
-      !body.ifsc
+      !body.account_number
     ) {
       const err = new Error('Bank details are required');
       err.code = 'INVALID_INPUT';
@@ -63,7 +62,9 @@ export async function createPaymentMethodService(userId, body) {
     payload.bank_name = body.bank_name;
     payload.account_name = body.account_name;
     payload.account_number = body.account_number;
-    payload.ifsc = body.ifsc;
+    if (body.ifsc) {
+      payload.ifsc = String(body.ifsc).trim();
+    }
 
     if (body.swift_code) {
       payload.swift_code = String(body.swift_code).trim();
