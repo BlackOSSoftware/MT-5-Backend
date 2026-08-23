@@ -41,7 +41,7 @@ const WithdrawalSchema = new mongoose.Schema(
     // METHOD
     method: {
       type: String,
-      enum: ["UPI", "BANK", "CRYPTO"],
+      enum: ["UPI", "BANK", "CRYPTO", "MANUAL"],
       required: true,
       index: true,
     },
@@ -84,6 +84,13 @@ const WithdrawalSchema = new mongoose.Schema(
         trim: true,
       },
       crypto_address: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+
+      // MANUAL
+      note: {
         type: String,
         default: "",
         trim: true,

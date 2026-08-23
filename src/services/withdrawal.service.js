@@ -104,6 +104,12 @@ const validatePayout = ({ method, payout }) => {
     }
   }
 
+  if (method === "MANUAL") {
+    if (!payout.account_holder_name || !payout.account_number) {
+      return { ok: false, message: "Manual payout details are required" };
+    }
+  }
+
   return { ok: true, message: "OK" };
 };
 
@@ -251,6 +257,7 @@ export const adminCreateWithdrawal = async ({
               ifsc: payout?.ifsc || "",
               crypto_network: payout?.crypto_network || "",
               crypto_address: payout?.crypto_address || "",
+              note: payout?.note || "",
             },
             status: "COMPLETED",
             actionBy: adminId,
@@ -521,6 +528,7 @@ export const createWithdrawal = async ({ userId, ipAddress, payload }) => {
               ifsc: payout?.ifsc || "",
               crypto_network: payout?.crypto_network || "",
               crypto_address: payout?.crypto_address || "",
+              note: payout?.note || "",
             },
             status: "PENDING",
             ipAddress: ipAddress || "",
