@@ -716,6 +716,7 @@ export class Engine {
     side,
     orderType,
     price,
+    limitPrice,
     volume,
     stopLoss,
     takeProfit,
@@ -729,7 +730,14 @@ export class Engine {
     if (!sym) throw new Error("Invalid symbol");
 
     if (
-      !["BUY_LIMIT", "SELL_LIMIT", "BUY_STOP", "SELL_STOP"].includes(orderType)
+      ![
+        "BUY_LIMIT",
+        "SELL_LIMIT",
+        "BUY_STOP",
+        "SELL_STOP",
+        "BUY_STOP_LIMIT",
+        "SELL_STOP_LIMIT",
+      ].includes(orderType)
     ) {
       throw new Error("Invalid pending order type");
     }
@@ -739,6 +747,7 @@ export class Engine {
       side,
       orderType,
       price: Number(price),
+      limitPrice: limitPrice !== undefined ? limitPrice : null,
       stopLoss: stopLoss !== undefined ? stopLoss : null,
       takeProfit: takeProfit !== undefined ? takeProfit : null,
       bid: sym.bid,
@@ -759,6 +768,10 @@ export class Engine {
       side,
       orderType,
       price: Number(price),
+      limitPrice:
+        limitPrice !== undefined && limitPrice !== null
+          ? Number(limitPrice)
+          : null,
       volume: Number(volume),
       stopLoss: stopLoss !== undefined ? stopLoss : null,
       takeProfit: takeProfit !== undefined ? takeProfit : null,
@@ -819,6 +832,7 @@ export class Engine {
       side: order.side,
       orderType: order.orderType,
       price: Number(newPrice),
+      limitPrice: order.limitPrice ?? null,
       stopLoss: newStop !== undefined ? newStop : null,
       takeProfit: newTake !== undefined ? newTake : null,
       bid: sym.bid,
@@ -1048,6 +1062,36 @@ export class Engine {
             account && account.spread_enabled
               ? this.formatPrice(account, sym, bid, ask)
               : { bid, ask };
+
+          /* ===== STOP_LIMIT -> LIMIT CONVERSION ===== */
+          const stopLimitHit =
+            (order.orderType === "BUY_STOP_LIMIT" &&
+              priceForChecks.ask >= order.price) ||
+            (order.orderType === "SELL_STOP_LIMIT" &&
+              priceForChecks.bid <= order.price);
+
+          if (stopLimitHit && order.limitPrice) {
+            order.orderType =
+              order.orderType === "BUY_STOP_LIMIT" ? "BUY_LIMIT" : "SELL_LIMIT";
+            order.price = order.limitPrice;
+            order.limitPrice = null;
+
+            ledgerQueue.enqueue("ORDER_PENDING_MODIFY", order);
+
+            try {
+              engineEvents.emit("LIVE_PENDING", {
+                ...order,
+                accountId: String(order.accountId),
+                status: "PENDING",
+              });
+            } catch (err) {
+              console.error(
+                "[ENGINE] emit LIVE_PENDING failed (stop-limit convert)",
+                err,
+              );
+            }
+            continue;
+          }
 
           const hit =
             (order.orderType === "BUY_LIMIT" &&

@@ -6,6 +6,7 @@ export function validateOrder({
   side,
   orderType,
   price,
+  limitPrice,
   stopLoss,
   takeProfit,
   bid,
@@ -98,6 +99,46 @@ export function validateOrder({
         throw new Error("Take profit must be below stop price");
       }
       break;
+
+    case "BUY_STOP_LIMIT": {
+      if (price <= buyPrice) {
+        throw new Error("BUY STOP LIMIT stop price must be above market price");
+      }
+      const lp = Number(limitPrice);
+      if (!Number.isFinite(lp) || lp <= 0) {
+        throw new Error("Limit price is required for STOP LIMIT orders");
+      }
+      if (lp >= price) {
+        throw new Error("Limit price must be below stop price");
+      }
+      if (stopLoss !== null && stopLoss >= lp) {
+        throw new Error("Stop loss must be below limit price");
+      }
+      if (takeProfit !== null && takeProfit <= lp) {
+        throw new Error("Take profit must be above limit price");
+      }
+      break;
+    }
+
+    case "SELL_STOP_LIMIT": {
+      if (price >= sellPrice) {
+        throw new Error("SELL STOP LIMIT stop price must be below market price");
+      }
+      const lp = Number(limitPrice);
+      if (!Number.isFinite(lp) || lp <= 0) {
+        throw new Error("Limit price is required for STOP LIMIT orders");
+      }
+      if (lp <= price) {
+        throw new Error("Limit price must be above stop price");
+      }
+      if (stopLoss !== null && stopLoss <= lp) {
+        throw new Error("Stop loss must be above limit price");
+      }
+      if (takeProfit !== null && takeProfit >= lp) {
+        throw new Error("Take profit must be below limit price");
+      }
+      break;
+    }
 
     default:
       throw new Error("Invalid order type");

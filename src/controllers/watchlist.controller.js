@@ -61,6 +61,32 @@ export const getWatchlistItem = async (req, res) => {
   }
 };
 
+export const reorderWatchlist = async (req, res) => {
+  try {
+    const { userId, accountId } = req.account;
+    const result = await watchlistService.reorderAccountWatchlist(
+      userId,
+      accountId,
+      req.body?.codes
+    );
+
+    if (result?.error) {
+      return res
+        .status(result.error.status)
+        .json({ success: false, message: result.error.message });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: result.message || "Watchlist order saved",
+      data: result.data,
+    });
+  } catch (error) {
+    console.log("REORDER WATCHLIST ERROR =>", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 export const addToWatchlist = async (req, res) => {
   try {
     const { userId, accountId } = req.account;
@@ -176,6 +202,30 @@ export const removeDefaultWatchlistItem = async (req, res) => {
     });
   } catch (error) {
     console.log("REMOVE DEFAULT WATCHLIST ERROR =>", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+export const getSegments = async (req, res) => {
+  try {
+    const { userId, accountId } = req.account;
+    const result = await watchlistService.getSegmentsWithCounts(
+      userId,
+      accountId
+    );
+
+    if (result?.error) {
+      return res
+        .status(result.error.status)
+        .json({ success: false, message: result.error.message });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Segments fetched",
+      data: result.data || [],
+    });
+  } catch (error) {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };

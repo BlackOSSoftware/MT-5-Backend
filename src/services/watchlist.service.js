@@ -314,13 +314,44 @@ export const watchlistService = {
       accountId,
       isAdded: true,
     })
-      .sort({ createdAt: -1, _id: -1 })
+      .sort({ sort_order: 1, createdAt: -1, _id: -1 })
       .limit(limit)
-      .select("_id code name isAdded accountId userId createdAt updatedAt");
+      .select(
+        "_id code name isAdded sort_order accountId userId createdAt updatedAt"
+      );
 
     await setRedisJSON(REDIS_ACCOUNT_KEY(accountId), items, 30);
 
     return { data: items, message: "Watchlist fetched" };
+  },
+
+  // Drag karke badli hui watchlist order ko save karo:
+  // codes jis order me aaye, wahi sort_order (0,1,2...) banega.
+  async reorderAccountWatchlist(userId, accountIdRaw, codesRaw) {
+    const accountId = normalizeAccountId(accountIdRaw);
+    if (!accountId) {
+      return { error: { status: 400, message: "AccountId is required" } };
+    }
+    if (!Array.isArray(codesRaw) || codesRaw.length === 0) {
+      return { error: { status: 400, message: "Codes are required" } };
+    }
+    const codes = [
+      ...new Set(codesRaw.map((c) => normalizeCode(c)).filter(Boolean)),
+    ];
+    if (codes.length === 0) {
+      return { error: { status: 400, message: "Codes are required" } };
+    }
+
+    const ops = codes.map((code, i) => ({
+      updateOne: {
+        filter: { userId, accountId, code },
+        update: { $set: { sort_order: i } },
+      },
+    }));
+    await WatchlistItem.bulkWrite(ops, { ordered: false });
+    await delRedis(REDIS_ACCOUNT_KEY(accountId));
+
+    return { data: codes, message: "Watchlist order saved" };
   },
 
   async getOne(userId, accountIdRaw, codeRaw) {
@@ -481,6 +512,47 @@ export const watchlistService = {
     return { data: updated, message: "Instrument removed from watchlist" };
   },
 
+async getSegmentsWithCounts(userId, accountIdRaw) {
+  const accountId = normalizeAccountId(accountIdRaw);
+  if (!accountId) {
+    return { error: { status: 400, message: "AccountId is required" } };
+  }
+
+  const addedItems = await WatchlistItem.find({
+    userId,
+    accountId,
+    isAdded: true,
+  }).select("code");
+  const addedCodes = addedItems
+    .map((x) => normalizeCode(x.code))
+    .filter(Boolean);
+
+  const rows = await InstrumentModel.aggregate([
+    { $match: { isActive: true } },
+    {
+      $group: {
+        _id: { $ifNull: ["$segment", ""] },
+        total: { $sum: 1 },
+        added: {
+          $sum: {
+            $cond: [{ $in: [{ $toUpper: "$code" }, addedCodes] }, 1, 0],
+          },
+        },
+      },
+    },
+    { $sort: { _id: 1 } },
+  ]);
+
+  const data = rows
+    .map((r) => ({
+      segment: String(r._id || "").trim().toUpperCase() || "OTHER",
+      total: r.total || 0,
+      added: r.added || 0,
+    }))
+    .filter((r) => r.total > 0);
+
+  return { data };
+},
 async getSegmentInstrumentsWithStatus(userId, accountIdRaw, segmentRaw, limit) {
   const accountId = normalizeAccountId(accountIdRaw);
   const segment = String(segmentRaw || "").trim().toUpperCase();

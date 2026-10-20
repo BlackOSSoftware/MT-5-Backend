@@ -96,12 +96,40 @@ export async function accountLoginService({
     }
   );
 
+  const user = await User.findById(account.user_id)
+    .select("name email")
+    .lean();
+
   return {
     tradeToken,
     sessionType,
     accountId: account._id.toString(),
     account_number: account.account_number,
     account_type: account.account_type,
+    // Account holder ka naam (app sidebar me number ki jagah
+    // naam dikhane ke liye).
+    name: user?.name || "",
+    email: user?.email || "",
+  };
+}
+
+/* =====================================================
+   ACCOUNT PROFILE (NAME ETC. FOR APP SIDEBAR)
+===================================================== */
+export async function getAccountProfileService({ accountId }) {
+  const account = await Account.findById(accountId).lean();
+  if (!account) {
+    throw new Error("Account not found");
+  }
+  const user = await User.findById(account.user_id)
+    .select("name email")
+    .lean();
+  return {
+    accountId: account._id.toString(),
+    account_number: account.account_number,
+    account_type: account.account_type,
+    name: user?.name || "",
+    email: user?.email || "",
   };
 }
 

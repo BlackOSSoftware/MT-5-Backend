@@ -1,11 +1,13 @@
 import express from "express";
-import { accountLoginController, resetTradePasswordController, resetWatchPasswordController, adminResetTradePasswordController, adminResetWatchPasswordController } from "../../controllers/accountAuth.controller.js";
+import { accountLoginController, getAccountProfileController, resetTradePasswordController, resetWatchPasswordController, adminResetTradePasswordController, adminResetWatchPasswordController } from "../../controllers/accountAuth.controller.js";
+import { accountAuthMiddleware } from "../../middlewares/accountAuth.middleware.js";
 import { authMiddleware } from "../../middlewares/auth.middleware.js";
 import { adminAuth } from "../../middlewares/adminAuth.middleware.js";
 
 const router = express.Router();
 
 router.post("/login", accountLoginController);
+router.get("/me", accountAuthMiddleware, getAccountProfileController);
 // reset trade password
 router.post("/:accountId/reset-trade-password",authMiddleware,resetTradePasswordController);
 // watch password reset

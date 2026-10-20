@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   addToWatchlist,
+  reorderWatchlist,
   getWatchlist,
   getWatchlistItem,
   removeFromWatchlist,
@@ -8,6 +9,7 @@ import {
   addDefaultWatchlistItem,
   removeDefaultWatchlistItem,
   getSegmentInstrumentsWithWatchlistStatus,
+  getSegments,
   searchInstrumentsWithWatchlistStatus,
 } from '../../controllers/watchlist.controller.js';
 
@@ -19,8 +21,10 @@ const router = Router();
 
 // user watchlist (ACCOUNT TOKEN)
 router.get('/', accountAuthMiddleware, getWatchlist);
+router.get('/segments', accountAuthMiddleware, getSegments);
 router.get('/:code', accountAuthMiddleware, getWatchlistItem);
 router.post('/add', accountAuthMiddleware, addToWatchlist);
+router.put('/reorder', accountAuthMiddleware, reorderWatchlist);
 router.delete('/remove/:code', accountAuthMiddleware, removeFromWatchlist);
 router.get('/segment/:segment', accountAuthMiddleware, getSegmentInstrumentsWithWatchlistStatus);
 router.get('/search/instruments', accountAuthMiddleware, searchInstrumentsWithWatchlistStatus);

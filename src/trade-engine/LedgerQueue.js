@@ -78,6 +78,10 @@ class LedgerQueue {
         await this.pendingCreate(payload);
         break;
 
+      case "ORDER_PENDING_MODIFY":
+        await this.pendingModify(payload);
+        break;
+
       case "ORDER_PENDING_EXECUTE":
         await this.pendingExecute(payload);
         break;
@@ -351,6 +355,7 @@ class LedgerQueue {
       side: order.side,
       orderType: order.orderType,
       price: order.price,
+      limitPrice: order.limitPrice ?? null,
       volume: order.volume,
       stopLoss: order.stopLoss ?? null,
       takeProfit: order.takeProfit ?? null,
@@ -359,6 +364,27 @@ class LedgerQueue {
     });
 
     console.log("[LEDGER][PENDING_CREATE][OK]", order.orderId);
+  }
+
+  /* =========================
+     PENDING MODIFY (also used for STOP_LIMIT -> LIMIT conversion)
+  ========================= */
+
+  async pendingModify(order) {
+    await PendingOrder.updateOne(
+      { orderId: order.orderId },
+      {
+        $set: {
+          orderType: order.orderType,
+          price: order.price,
+          limitPrice: order.limitPrice ?? null,
+          stopLoss: order.stopLoss ?? null,
+          takeProfit: order.takeProfit ?? null,
+        },
+      }
+    );
+
+    console.log("[LEDGER][PENDING_MODIFY][OK]", order.orderId);
   }
 
   /* =========================

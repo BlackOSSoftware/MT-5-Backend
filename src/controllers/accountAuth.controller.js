@@ -1,5 +1,6 @@
 import {
   accountLoginService,
+  getAccountProfileService,
   resetTradePasswordService,
   resetWatchPasswordService,
   adminResetTradePasswordService,
@@ -53,6 +54,22 @@ export async function accountLoginController(req, res) {
       device: req.headers["user-agent"] || "unknown",
     });
 
+    return res.json(result);
+  } catch (err) {
+    return res.status(400).json({ message: err.message });
+  }
+}
+
+/* =====================================================
+   ACCOUNT PROFILE (ACCOUNT TOKEN)
+===================================================== */
+export async function getAccountProfileController(req, res) {
+  try {
+    const accountId = req.account?.accountId;
+    if (!accountId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const result = await getAccountProfileService({ accountId });
     return res.json(result);
   } catch (err) {
     return res.status(400).json({ message: err.message });

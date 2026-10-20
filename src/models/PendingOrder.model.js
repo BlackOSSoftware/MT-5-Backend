@@ -47,7 +47,14 @@ const PendingOrderSchema = new mongoose.Schema(
     /** Pending order types only */
     orderType: {
       type: String,
-      enum: ["BUY_LIMIT", "SELL_LIMIT", "BUY_STOP", "SELL_STOP"],
+      enum: [
+        "BUY_LIMIT",
+        "SELL_LIMIT",
+        "BUY_STOP",
+        "SELL_STOP",
+        "BUY_STOP_LIMIT",
+        "SELL_STOP_LIMIT",
+      ],
       required: true,
       index: true,
     },
@@ -60,6 +67,12 @@ const PendingOrderSchema = new mongoose.Schema(
     price: {
       type: Number,
       required: true,
+    },
+
+    /** Limit price for STOP_LIMIT orders (null otherwise) */
+    limitPrice: {
+      type: Number,
+      default: null,
     },
 
     volume: {

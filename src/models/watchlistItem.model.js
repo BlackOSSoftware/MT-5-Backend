@@ -38,6 +38,13 @@ const WatchlistItemSchema = new mongoose.Schema(
       default: true,
       index: true,
     },
+
+    // User ki rakhi hui position (drag karke badli hui order).
+    // null = abhi tak koi custom order nahi (createdAt order chalegi).
+    sort_order: {
+      type: Number,
+      default: null,
+    },
   },
   {
     timestamps: true,
