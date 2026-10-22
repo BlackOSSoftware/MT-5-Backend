@@ -28,6 +28,7 @@ import bonusRoutes from "./v1/bonus.routes.js";
 import activityRoutes from "./v1/activity.routes.js";
 import metaQuotesRoutes from "./v1/metaQuotes.routes.js";
 import { chartRoutes } from "../modules/chart/index.js";
+import { appUpdateRoutes } from "../modules/app-update/index.js";
 const router = Router();
 
 
@@ -60,5 +61,6 @@ router.use("/v1/bonus", bonusRoutes);
 router.use("/v1/activity", activityRoutes);
 router.use("/v1/metaquotes", metaQuotesRoutes);
 router.use("/v1/chart", chartRoutes);
+router.use("/v1/app-update", appUpdateRoutes);
 
 export default router;

@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import routes from './routes/index.js';
+import { DOWNLOADS_DIR, DOWNLOADS_ROUTE } from './modules/app-update/index.js';
 
 const app = express();
 // updated
@@ -32,6 +34,20 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 
 app.use('/api', routes);
+
+// APK release files (public/downloads/*.apk) - app update yahin se download karta hai.
+app.use(
+  DOWNLOADS_ROUTE,
+  express.static(path.resolve(DOWNLOADS_DIR), {
+    index: false,
+    dotfiles: 'deny',
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.apk')) {
+        res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      }
+    },
+  }),
+);
 
 app.get('/', (req, res) => {
   res.status(200).json({ status: 'ok' });

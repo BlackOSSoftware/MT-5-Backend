@@ -6,3 +6,5 @@ seed-default.mjs
 
 # Local trade data backups
 scripts/backup-*.json
+# Release APKs (public/downloads me rakho, git me nahi)
+public/downloads/*.apk
