@@ -32,6 +32,8 @@ const PendingOrderSchema = new mongoose.Schema(
       index: true,
     },
 
+    ticket: { type: Number, unique: true, sparse: true },
+
     symbol: {
       type: String,
       required: true,
@@ -122,6 +124,14 @@ const PendingOrderSchema = new mongoose.Schema(
     cancelledAt: {
       type: Date,
       default: null,
+    },
+
+    /** GTC = Good Till Cancelled (kabhi expire nahi), TODAY /
+     *  SPECIFIED / SPECIFIED_DAY ke saath expireAt bhi ayega. */
+    expireType: {
+      type: String,
+      enum: ["GTC", "TODAY", "SPECIFIED", "SPECIFIED_DAY"],
+      default: "GTC",
     },
 
     expireAt: {

@@ -4,10 +4,48 @@ import { Engine } from "./Engine.js";
 
 import Trade from "../models/Trade.model.js";
 import PendingOrder from "../models/PendingOrder.model.js";
+import {
+  nextDealTicket,
+  nextOrderTicket,
+} from "../services/orderTicket.service.js";
 
 export const tradeEngine = new Engine();
 
+async function backfillField(Model, field, filter, nextTicket) {
+  const cursor = Model.find({ ...filter, [field]: { $exists: false } })
+    .select("_id")
+    .lean()
+    .cursor();
+  for await (const record of cursor) {
+    const ticket = await nextTicket();
+    await Model.updateOne(
+      { _id: record._id, [field]: { $exists: false } },
+      { $set: { [field]: ticket } },
+    );
+  }
+}
+
+async function backfillOrderTickets() {
+  await backfillField(Trade, "ticket", {}, nextOrderTicket);
+  await backfillField(PendingOrder, "ticket", {}, nextOrderTicket);
+  // Purane band trades: close order + in/out deals ke unique numbers.
+  await backfillField(
+    Trade,
+    "closeTicket",
+    { status: "CLOSED" },
+    nextOrderTicket,
+  );
+  await backfillField(Trade, "openDealTicket", {}, nextDealTicket);
+  await backfillField(
+    Trade,
+    "closeDealTicket",
+    { status: "CLOSED" },
+    nextDealTicket,
+  );
+}
+
 export async function bootstrapEngine({ accounts, symbols }) {
+  await backfillOrderTickets();
   /* =========================
      LOAD ACCOUNTS
   ========================= */

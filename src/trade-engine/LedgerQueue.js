@@ -6,6 +6,10 @@ import Brokerage from "../models/Brokerage.model.js";
 import { engineEvents } from "./EngineEvents.js";
 import { publishAccountBalance } from "./EngineSyncBus.js";
 import { consumeNonWithdrawableBalance } from "../utils/nonWithdrawable.util.js";
+import {
+  nextDealTicket,
+  nextOrderTicket,
+} from "../services/orderTicket.service.js";
 
 class LedgerQueue {
   constructor() {
@@ -72,6 +76,10 @@ class LedgerQueue {
         await this.tradeClose(payload);
         break;
 
+      case "POSITION_MODIFY":
+        await this.positionModify(payload);
+        break;
+
       /* ================= PENDING ================= */
 
       case "ORDER_PENDING_CREATE":
@@ -108,6 +116,7 @@ class LedgerQueue {
     accountId,
     ipAddress,
     positionId,
+    ticket,
     symbol,
     side,
     orderType,
@@ -140,6 +149,8 @@ class LedgerQueue {
       ipAddress: ipAddress || "SYSTEM",
 
       positionId,
+      ticket,
+      openDealTicket: await nextDealTicket(),
       symbol,
       side,
       orderType,
@@ -166,6 +177,24 @@ class LedgerQueue {
   }
 
   /* =========================
+     POSITION MODIFY (SL / TP)
+  ========================= */
+
+  async positionModify({ positionId, stopLoss, takeProfit }) {
+    await Trade.updateOne(
+      { positionId, status: "OPEN" },
+      {
+        $set: {
+          stopLoss: stopLoss ?? null,
+          takeProfit: takeProfit ?? null,
+        },
+      },
+    );
+
+    console.log("[LEDGER][POSITION_MODIFY][OK]", positionId);
+  }
+
+  /* =========================
      TRADE CLOSE
   ========================= */
 
@@ -173,6 +202,7 @@ class LedgerQueue {
     userId,
     accountId,
     positionId,
+    closeTicket,
     closePrice,
     realizedPnL,
     reason,
@@ -187,10 +217,17 @@ class LedgerQueue {
       throw new Error("Ledger tradeClose: realizedPnL is NaN");
     }
 
+    // SL / TP / stop-out closes engine ke andar sync hote hain, unka
+    // close ticket yahan banta hai.
+    const outTicket =
+      typeof closeTicket === "number" ? closeTicket : await nextOrderTicket();
+
     const trade = await Trade.findOneAndUpdate(
       { positionId, status: "OPEN" },
       {
         $set: {
+          closeTicket: outTicket,
+          closeDealTicket: await nextDealTicket(),
           closePrice,
           realizedPnL: pnl,
           closeReason: reason,
@@ -349,6 +386,7 @@ class LedgerQueue {
   async pendingCreate(order) {
     await PendingOrder.create({
       orderId: order.orderId,
+      ticket: order.ticket,
       userId: order.userId,
       accountId: order.accountId,
       symbol: order.symbol,
@@ -359,6 +397,8 @@ class LedgerQueue {
       volume: order.volume,
       stopLoss: order.stopLoss ?? null,
       takeProfit: order.takeProfit ?? null,
+      expireType: order.expireType || "GTC",
+      expireAt: order.expireAt ? new Date(order.expireAt) : null,
       status: "PENDING",
       createdAt: new Date(order.createdAt),
     });
@@ -409,12 +449,15 @@ class LedgerQueue {
      PENDING CANCEL
   ========================= */
 
-  async pendingCancel({ orderId }) {
+  async pendingCancel({ orderId, reason }) {
+    // Expiration wala cancel EXPIRED status me jayega,
+    // user ka manual cancel CANCELLED me.
+    const expired = reason === "EXPIRED";
     await PendingOrder.updateOne(
       { orderId },
       {
         $set: {
-          status: "CANCELLED",
+          status: expired ? "EXPIRED" : "CANCELLED",
           cancelledAt: new Date(),
         },
       }

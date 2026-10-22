@@ -2,6 +2,7 @@
 export class Position {
   constructor({
     positionId,
+    ticket,
     accountId,
     symbol,
     side,
@@ -13,6 +14,7 @@ export class Position {
     takeProfit,
   }) {
     this.positionId = positionId;
+    this.ticket = ticket;
     this.accountId = accountId;
     this.symbol = symbol;
     this.side = side;

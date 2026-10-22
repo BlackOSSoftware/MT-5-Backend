@@ -1,12 +1,15 @@
 import { tradeEngine } from "../trade-engine/bootstrap.js";
 import Account from "../models/Account.model.js";
+import { nextOrderTicket } from "../services/orderTicket.service.js";
 import {
-  getDealsService,
-  getOrdersService,
   getPositionsService,
   getSingleAccountService,
   getTradeSummaryService,
 } from "../services/tradeOrder.service.js";
+import {
+  getDealsService,
+  getOrdersService,
+} from "../services/history.service.js";
 import { getUserPortfolioSummaryService } from "../services/tradePortfolio.service.js";
 
 /* =========================
@@ -75,6 +78,7 @@ export async function placeMarketOrderController(req, res) {
     await verifyAccountOwnership(userId, accountId);
 
     const position = tradeEngine.placeMarketOrder({
+      ticket: await nextOrderTicket(),
       accountId,
       symbol: String(symbol).toUpperCase(),
       side,
@@ -115,6 +119,7 @@ export async function closePosition(req, res) {
       accountId,
       positionId,
       reason: "MANUAL_CLOSE",
+      closeTicket: await nextOrderTicket(),
     });
 
     return res.json({ status: "success", data: result });
@@ -143,6 +148,8 @@ export async function placePendingOrderController(req, res) {
       volume,
       stopLoss,
       takeProfit,
+      expireType = "GTC",
+      expireAt = null,
     } = req.body;
 
     if (!symbol || !side || !orderType || !price || !volume) {
@@ -155,6 +162,7 @@ export async function placePendingOrderController(req, res) {
     await verifyAccountOwnership(userId, accountId);
 
     const order = tradeEngine.placePendingOrder({
+      ticket: await nextOrderTicket(),
       userId,
       accountId,
       symbol: String(symbol).toUpperCase(),
@@ -165,6 +173,8 @@ export async function placePendingOrderController(req, res) {
       volume: Number(volume),
       stopLoss: typeof stopLoss === "number" ? stopLoss : null,
       takeProfit: typeof takeProfit === "number" ? takeProfit : null,
+      expireType: String(expireType || "GTC").toUpperCase(),
+      expireAt: expireAt || null,
     });
 
     return res.json({ status: "success", data: order });
@@ -195,11 +205,15 @@ export async function modifyPositionController(req, res) {
 
     await verifyAccountOwnership(userId, accountId);
 
+    // number = set, null = clear, field na bheja = unchanged
+    const level = (v) =>
+      typeof v === "number" && v > 0 ? v : v === null || v === 0 ? null : undefined;
+
     tradeEngine.modifyPosition({
       accountId,
       positionId,
-      stopLoss: typeof stopLoss === "number" ? stopLoss : null,
-      takeProfit: typeof takeProfit === "number" ? takeProfit : null,
+      stopLoss: level(stopLoss),
+      takeProfit: level(takeProfit),
     });
 
     return res.json({ status: "success" });

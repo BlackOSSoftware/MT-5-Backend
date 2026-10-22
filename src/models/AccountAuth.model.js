@@ -29,6 +29,19 @@ const AccountAuthSchema = new mongoose.Schema(
       select: false,
     },
 
+    // MT5 app ke extra passwords (login ke liye nahi, sirf record).
+    trader_password_hash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+
+    money_manager_password_hash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+
     login_attempts: {
       type: Number,
       default: 0,
@@ -51,6 +64,13 @@ const AccountAuthSchema = new mongoose.Schema(
     },
 
     access_token_expires_at: Date,
+
+    refresh_token_hash: {
+      type: String,
+      select: false,
+    },
+
+    refresh_token_expires_at: Date,
 
     is_locked: {
       type: Boolean,

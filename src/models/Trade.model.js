@@ -36,6 +36,15 @@ const TradeSchema = new mongoose.Schema(
       index: true,
     },
 
+    ticket: { type: Number, unique: true, sparse: true },
+
+    /** Close (out) order ticket - MT5 me close ek alag order hai. */
+    closeTicket: { type: Number, unique: true, sparse: true },
+
+    /** Deal tickets (in / out) - History > Deals me dikhte hain. */
+    openDealTicket: { type: Number, unique: true, sparse: true },
+    closeDealTicket: { type: Number, unique: true, sparse: true },
+
     symbol: {
       type: String,
       required: true,

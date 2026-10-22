@@ -3,3 +3,6 @@ node_modules
 firebase-admin-key.json
 logs/
 seed-default.mjs
+
+# Local trade data backups
+scripts/backup-*.json

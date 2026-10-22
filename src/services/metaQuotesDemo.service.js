@@ -1,13 +1,21 @@
 import { randomBytes } from "crypto";
 
 import MetaQuotesDemoAccount from "../models/MetaQuotesDemoAccount.model.js";
+import Account from "../models/Account.model.js";
+import AccountAuth from "../models/AccountAuth.model.js";
+import AccountPlan from "../models/AccountPlan.model.js";
+import User from "../models/User.model.js";
+import EngineSync from "../trade-engine/EngineSync.js";
+import { publishAccountSnapshot } from "../trade-engine/EngineSyncBus.js";
 import { comparePassword, hashPassword } from "../utils/hash.util.js";
+import { accountLoginService } from "./accountAuth.service.js";
 
 /**
  * MetaQuotes demo accounts (mobile app).
- * Registration data is stored in Mongo (`metaquotes_demo_accounts`),
- * but trading for these accounts happens locally in the app - nothing
- * is sent to the server trade engine.
+ * Registration data `metaquotes_demo_accounts` me; trading ke liye har
+ * account ka ek asli demo `Account` + `AccountAuth` banta hai (account
+ * number = MQ login id, trade password = MQ password, watch password =
+ * investor password), aur login pe usi ka trading session milta hai.
  */
 
 function generatePassword() {
@@ -33,12 +41,105 @@ async function generateLoginId() {
     const candidate = String(
       Math.floor(10000000 + Math.random() * 89999999),
     );
-    const exists = await MetaQuotesDemoAccount.exists({
-      login_id: candidate,
-    });
-    if (!exists) return candidate;
+    // MQ login id hi trading account number banta hai - dono me unique.
+    const [mq, acc] = await Promise.all([
+      MetaQuotesDemoAccount.exists({ login_id: candidate }),
+      Account.exists({ account_number: candidate }),
+    ]);
+    if (!mq && !acc) return candidate;
   }
   throw new Error("Could not generate account login, please try again");
+}
+
+function parseLeverage(value) {
+  const m = /(\d+)\s*$/.exec(String(value || ""));
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * MQ demo ka trading Account (+ AccountAuth) - na ho to banao.
+ * `doc` me password_hash / investor_password_hash selected hone chahiye.
+ */
+async function ensureTradingAccount(doc) {
+  let account = doc.trading_account_id
+    ? await Account.findById(doc.trading_account_id).lean()
+    : null;
+  if (!account) {
+    account = await Account.findOne({ account_number: doc.login_id }).lean();
+  }
+
+  if (!account) {
+    const plan = await AccountPlan.findOne({
+      isActive: true,
+      is_demo_allowed: true,
+    }).lean();
+    if (!plan) throw new Error("No demo plan available");
+
+    // Har MQ demo ka apna user (synthetic e-mail) - asli FP user ki
+    // e-mail se takrav / portal me ghuspaith na ho.
+    const email = `mq-${doc.login_id}@metaquotes.demo`;
+    const name = [doc.first_name, doc.second_name]
+      .map((s) => String(s || "").trim())
+      .filter(Boolean)
+      .join(" ");
+    const user =
+      (await User.findOne({ email }).lean()) ||
+      (await User.create({ email, name, isMailVerified: true }));
+
+    const balance = Number(doc.balance ?? doc.deposit) || 0;
+    const created = await Account.create({
+      user_id: user._id,
+      account_plan_id: plan._id,
+      account_number: doc.login_id,
+      account_type: "demo",
+      plan_name: plan.name,
+      leverage:
+        parseLeverage(doc.leverage) ||
+        (typeof plan.max_leverage === "number" ? plan.max_leverage : 100),
+      spread_enabled:
+        typeof plan.spread_enabled === "boolean" ? plan.spread_enabled : true,
+      spread_pips: typeof plan.spreadPips === "number" ? plan.spreadPips : 0,
+      commission_per_lot:
+        typeof plan.commission_per_lot === "number"
+          ? plan.commission_per_lot
+          : 0,
+      swap_enabled:
+        typeof plan.swap_enabled === "boolean" ? plan.swap_enabled : true,
+      swap_charge:
+        typeof plan.swap_charge === "number" ? Math.abs(plan.swap_charge) : 0,
+      balance,
+      equity: balance,
+      currency: doc.currency || plan.currency || "USD",
+      status: "active",
+    });
+    account = created.toObject();
+    await EngineSync.onAccountCreated(created._id);
+    publishAccountSnapshot(created);
+  }
+
+  const auth = await AccountAuth.exists({ account_id: account._id });
+  if (!auth) {
+    await AccountAuth.create({
+      account_id: account._id,
+      account_number: account.account_number,
+      trade_password_hash: doc.password_hash,
+      // Watch (investor) password trade se alag hona zaroori hai.
+      watch_password_hash:
+        doc.investor_password_hash || (await hashPassword(generatePassword())),
+      login_attempts: 0,
+      is_locked: false,
+      credentials_created_at: new Date(),
+    });
+  }
+
+  if (String(doc.trading_account_id || "") !== String(account._id)) {
+    await MetaQuotesDemoAccount.updateOne(
+      { _id: doc._id },
+      { $set: { trading_account_id: account._id } },
+    );
+  }
+  return account;
 }
 
 function publicView(doc, extra = {}) {
@@ -59,7 +160,19 @@ function publicView(doc, extra = {}) {
   };
 }
 
-export async function registerMetaQuotesDemoService(body) {
+/** MQ demo ke trading account ka session (same as FP account-auth login). */
+async function tradingSession(doc, password, meta) {
+  const account = await ensureTradingAccount(doc);
+  const session = await accountLoginService({
+    account_number: account.account_number,
+    password,
+    ip: meta?.ip,
+    device: meta?.device,
+  });
+  return { account, session };
+}
+
+export async function registerMetaQuotesDemoService(body, meta) {
   const firstName = String(body.first_name || "").trim();
   const secondName = String(body.second_name || "").trim();
   const dateOfBirth = String(body.date_of_birth || "").trim();
@@ -81,7 +194,8 @@ export async function registerMetaQuotesDemoService(body) {
   }
 
   const password = generatePassword();
-  const investorPassword = generatePassword();
+  let investorPassword = generatePassword();
+  while (investorPassword === password) investorPassword = generatePassword();
   const doc = await MetaQuotesDemoAccount.create({
     login_id: await generateLoginId(),
     email,
@@ -100,15 +214,23 @@ export async function registerMetaQuotesDemoService(body) {
     currency: String(body.currency || "USD"),
   });
 
+  const { account, session } = await tradingSession(
+    doc.toObject(),
+    password,
+    meta,
+  );
+
   // Plain passwords are returned ONCE so the app can show them to the
   // user (success screen); only the hashes are stored.
   return publicView(doc.toObject(), {
+    balance: account.balance,
     password,
     investor_password: investorPassword,
+    session,
   });
 }
 
-export async function loginMetaQuotesDemoService(body) {
+export async function loginMetaQuotesDemoService(body, meta) {
   // type: "CLIENT_ID" (identifier = e-mail) | "TRADE_ACCOUNT" (login id)
   const type = String(body.type || "CLIENT_ID").toUpperCase();
   const identifier = String(body.identifier || "").trim();
@@ -124,7 +246,7 @@ export async function loginMetaQuotesDemoService(body) {
       : { email: identifier.toLowerCase(), status: "active" };
 
   const doc = await MetaQuotesDemoAccount.findOne(query).select(
-    "+password_hash",
+    "+password_hash +investor_password_hash",
   );
   if (!doc) throw new Error("Invalid credentials");
 
@@ -134,5 +256,12 @@ export async function loginMetaQuotesDemoService(body) {
   doc.last_login_at = new Date();
   await doc.save();
 
-  return publicView(doc.toObject());
+  // Purane MQ accounts ka trading account yahin (pehli login pe) banta hai.
+  const { account, session } = await tradingSession(
+    doc.toObject(),
+    password,
+    meta,
+  );
+
+  return publicView(doc.toObject(), { balance: account.balance, session });
 }

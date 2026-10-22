@@ -337,6 +337,7 @@ export class Engine {
 
     const position = new Position({
       positionId: trade.positionId,
+      ticket: trade.ticket,
       accountId: String(trade.accountId),
       symbol: trade.symbol,
       side: trade.side,
@@ -378,12 +379,14 @@ export class Engine {
 
     account.pendingOrders.set(order.orderId, {
       orderId: order.orderId,
+      ticket: order.ticket,
       userId: order.userId,
       accountId: String(order.accountId),
       symbol: order.symbol,
       side: order.side,
       orderType: order.orderType,
       price: order.price,
+      limitPrice: order.limitPrice ?? null,
       volume: order.volume,
       stopLoss: order.stopLoss,
       takeProfit: order.takeProfit,
@@ -398,6 +401,7 @@ export class Engine {
       engineEvents.emit("LIVE_PENDING", {
         accountId: String(order.accountId),
         orderId: order.orderId,
+        ticket: order.ticket,
         symbol: order.symbol,
         side: order.side,
         orderType: order.orderType,
@@ -495,6 +499,7 @@ export class Engine {
   ========================== */
 
   placeMarketOrder({
+    ticket,
     accountId,
     symbol,
     side,
@@ -544,6 +549,7 @@ export class Engine {
 
     const position = new Position({
       positionId: uuidv4(),
+      ticket,
       accountId,
       symbol,
       side,
@@ -637,6 +643,7 @@ export class Engine {
       accountId,
       ipAddress: account.lastIp || "SYSTEM",
       positionId: position.positionId,
+      ticket: position.ticket,
       symbol,
       side,
       orderType: "MARKET",
@@ -658,6 +665,7 @@ export class Engine {
       engineEvents.emit("LIVE_POSITION", {
         accountId: account.accountId,
         positionId: position.positionId,
+        ticket: position.ticket,
         volume: position.volume,
         openTime: position.openTime || Date.now(),
         symbol: position.symbol,
@@ -710,6 +718,7 @@ export class Engine {
   ========================== */
 
   placePendingOrder({
+    ticket,
     userId,
     accountId,
     symbol,
@@ -762,6 +771,7 @@ export class Engine {
 
     const order = {
       orderId,
+      ticket,
       userId,
       accountId,
       symbol,
@@ -883,25 +893,24 @@ export class Engine {
     const bid = sym.bid;
     const ask = sym.ask;
 
+    // undefined = jaisa hai waisa rakho, null = hatao, number = naya.
+    const nextSl = stopLoss === undefined ? pos.stopLoss : stopLoss;
+    const nextTp = takeProfit === undefined ? pos.takeProfit : takeProfit;
+
     // validate new SL/TP
     validateOrder({
       side: pos.side,
       orderType: "MARKET",
       price: null,
-      stopLoss: typeof stopLoss === "number" ? stopLoss : pos.stopLoss,
-      takeProfit: typeof takeProfit === "number" ? takeProfit : pos.takeProfit,
+      stopLoss: nextSl ?? null,
+      takeProfit: nextTp ?? null,
       bid,
       ask,
     });
 
     // apply updates
-    if (typeof stopLoss === "number") {
-      pos.stopLoss = stopLoss;
-    }
-
-    if (typeof takeProfit === "number") {
-      pos.takeProfit = takeProfit;
-    }
+    pos.stopLoss = nextSl ?? null;
+    pos.takeProfit = nextTp ?? null;
 
     // ledger
     ledgerQueue.enqueue("POSITION_MODIFY", {
@@ -1109,6 +1118,7 @@ export class Engine {
 
           try {
             const position = this.placeMarketOrder({
+              ticket: order.ticket,
               accountId: order.accountId,
               symbol: order.symbol,
               side: order.side,
@@ -1229,6 +1239,7 @@ export class Engine {
           engineEvents.emit("LIVE_POSITION", {
             accountId: account.accountId,
             positionId: pos.positionId,
+            ticket: pos.ticket,
             volume: pos.volume,
             openTime: pos.openTime,
             symbol: pos.symbol,
@@ -1323,7 +1334,7 @@ export class Engine {
      CLOSE
   ========================== */
 
-  closePositionInternal(account, pos, reason, sym) {
+  closePositionInternal(account, pos, reason, sym, closeTicket = null) {
     // use per-account formatted prices for PnL and close price
     let formatted = { bid: sym.bid, ask: sym.ask };
     try {
@@ -1369,6 +1380,7 @@ export class Engine {
       userId: account.userId,
       accountId: account.accountId,
       positionId: pos.positionId,
+      closeTicket,
       closePrice: pos.side === "BUY" ? formatted.bid : formatted.ask,
       realizedPnL: Number(pos.floatingPnL.toFixed(2)),
       reason,
@@ -1450,7 +1462,12 @@ export class Engine {
     }
   }
 
-  squareOffPosition({ accountId, positionId, reason = "MANUAL" }) {
+  squareOffPosition({
+    accountId,
+    positionId,
+    reason = "MANUAL",
+    closeTicket = null,
+  }) {
     const account = this.accounts.get(accountId);
 
     if (!account) throw new Error("Account not found");
@@ -1471,10 +1488,12 @@ export class Engine {
       throw new Error("Market is closed");
     }
 
-    this.closePositionInternal(account, pos, reason, sym);
+    this.closePositionInternal(account, pos, reason, sym, closeTicket);
 
     return {
       positionId,
+      ticket: pos.ticket,
+      closeTicket,
       realizedPnL: Number(pos.floatingPnL.toFixed(2)),
     };
   }

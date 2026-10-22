@@ -4,11 +4,10 @@ import mongoose from "mongoose";
  * MetaQuotes demo accounts opened from the mobile app (Brokers ->
  * MetaQuotes Ltd. -> Open a demo account).
  *
- * These live in their OWN collection on purpose: they are NOT server
- * trading accounts (not in `accounts` / trade engine). The app trades
- * them locally on the device; the server only stores the registration
- * (login id + e-mail client id + password hash) so the user can log
- * in again later.
+ * Registration profile (login id + e-mail client id + password hash)
+ * yahan rehta hai; trading ke liye har MQ demo ka ek asli demo
+ * `Account` (+ AccountAuth) bhi banta hai - `trading_account_id` -
+ * taaki trade engine isi account pe orders chalaye.
  */
 const MetaQuotesDemoAccountSchema = new mongoose.Schema(
   {
@@ -66,6 +65,14 @@ const MetaQuotesDemoAccountSchema = new mongoose.Schema(
     },
 
     last_login_at: { type: Date, default: null },
+
+    // Server trading account (Account._id) jispe is MQ demo ke trades chalte hain.
+    trading_account_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Account",
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true,

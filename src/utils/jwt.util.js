@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'node:crypto';
 
 const ACCESS_TOKEN_TTL = '12h';
 const ACCOUNT_JWT_SECRET = process.env.ACCOUNT_JWT_SECRET;
@@ -35,9 +36,34 @@ export function verifyAccountToken(token) {
     !decoded ||
     !decoded.accountId ||
     !decoded.userId ||
-    !decoded.sessionType
+    !decoded.sessionType ||
+    decoded.tokenType === "REFRESH"
   ) {
     throw new Error("Invalid account token");
+  }
+
+  return decoded;
+}
+
+/* ================= REFRESH TOKEN (30 days) ================= */
+
+const ACCOUNT_REFRESH_EXPIRE = "30d";
+
+export function signAccountRefreshToken(payload) {
+  return jwt.sign(
+    { ...payload, tokenType: "REFRESH", jti: randomUUID() },
+    ACCOUNT_JWT_SECRET,
+    {
+      expiresIn: ACCOUNT_REFRESH_EXPIRE,
+    }
+  );
+}
+
+export function verifyAccountRefreshToken(token) {
+  const decoded = jwt.verify(token, ACCOUNT_JWT_SECRET);
+
+  if (!decoded || decoded.tokenType !== "REFRESH" || !decoded.accountId) {
+    throw new Error("Invalid refresh token");
   }
 
   return decoded;

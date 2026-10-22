@@ -1,13 +1,35 @@
 import express from "express";
-import { accountLoginController, getAccountProfileController, resetTradePasswordController, resetWatchPasswordController, adminResetTradePasswordController, adminResetWatchPasswordController } from "../../controllers/accountAuth.controller.js";
+import { accountLoginController, refreshAccountSessionController, getAccountProfileController, resetTradePasswordController, resetWatchPasswordController, adminResetTradePasswordController, adminResetWatchPasswordController } from "../../controllers/accountAuth.controller.js";
 import { accountAuthMiddleware } from "../../middlewares/accountAuth.middleware.js";
+import { changeAccountPasswordService } from "../../services/accountPassword.service.js";
+
+async function changeAccountPasswordController(req, res) {
+  try {
+    if (req.account?.sessionType !== "TRADE") {
+      return res.status(403).json({ message: "You do not have permission" });
+    }
+    const { kind, currentPassword, newPassword } = req.body || {};
+    const result = await changeAccountPasswordService({
+      accountId: req.account.accountId,
+      kind,
+      currentPassword,
+      newPassword,
+    });
+    return res.json(result);
+  } catch (err) {
+    return res.status(400).json({ message: err.message });
+  }
+}
 import { authMiddleware } from "../../middlewares/auth.middleware.js";
 import { adminAuth } from "../../middlewares/adminAuth.middleware.js";
 
 const router = express.Router();
 
 router.post("/login", accountLoginController);
+router.post("/refresh", refreshAccountSessionController);
 router.get("/me", accountAuthMiddleware, getAccountProfileController);
+// MT5 app: master / investor / trader / money manager password change
+router.post("/change-password", accountAuthMiddleware, changeAccountPasswordController);
 // reset trade password
 router.post("/:accountId/reset-trade-password",authMiddleware,resetTradePasswordController);
 // watch password reset

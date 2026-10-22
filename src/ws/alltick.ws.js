@@ -1395,6 +1395,7 @@ export async function handleClientMessage(clientWs, msg) {
               const payload = {
                 accountId,
                 positionId: pos.positionId,
+                ticket: pos.ticket,
                 volume: pos.volume,
                 openTime: pos.openTime || Date.now(),
                 symbol: pos.symbol,

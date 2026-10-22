@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { randomUUID } from "node:crypto";
 import Account from "../models/Account.model.js";
+import { nextOrderTicket } from "../services/orderTicket.service.js";
 import Instrument from "../models/Instrument.model.js";
 import Trade from "../models/Trade.model.js";
 import Transaction from "../models/Transaction.model.js";
@@ -293,6 +294,7 @@ export const adminPlaceMarketOrder = async (req, res) => {
     const normalizedSymbol = normalizeSymbol(symbol);
 
     const pos = tradeEngine.placeMarketOrder({
+      ticket: await nextOrderTicket(),
       accountId: String(account._id),
       symbol: normalizedSymbol,
       side: sideUpper,
@@ -366,6 +368,7 @@ export const adminPlacePendingOrder = async (req, res) => {
     const normalizedSymbol = normalizeSymbol(symbol);
 
     const order = tradeEngine.placePendingOrder({
+      ticket: await nextOrderTicket(),
       userId: String(account.user_id),
       accountId: String(account._id),
       symbol: normalizedSymbol,
@@ -511,6 +514,7 @@ export const adminClosePosition = async (req, res) => {
       accountId: String(account._id),
       positionId: String(positionId),
       reason: "MANUAL",
+      closeTicket: await nextOrderTicket(),
     });
 
     return res.json({ success: true, data: result });
