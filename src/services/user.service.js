@@ -36,7 +36,7 @@ export async function searchUsersService(query = {}) {
   };
 
   const users = await User.find(filter)
-    .select('_id name email phone userType isMailVerified kycStatus createdAt')
+    .select('_id name email phone userType isMailVerified kycStatus createdAt isOnline lastSeenAt')
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
@@ -314,7 +314,7 @@ export async function adminListUsersService(query = {}) {
   const [items, total] = await Promise.all([
     User.find(filter)
       .select(
-        "_id name email phone userType isMailVerified kycStatus createdAt"
+        "_id name email phone userType isMailVerified kycStatus createdAt isOnline lastSeenAt"
       )
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -370,6 +370,8 @@ export async function adminGetUserProfileService(userId) {
         isMailVerified: 1,
         kycStatus: 1,
         createdAt: 1,
+        isOnline: 1,
+        lastSeenAt: 1,
 
         date_of_birth: '$profile.date_of_birth',
         gender: '$profile.gender',

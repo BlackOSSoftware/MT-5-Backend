@@ -49,7 +49,19 @@ const userSchema = new mongoose.Schema(
       enum: ['NOT_STARTED', 'PENDING', 'VERIFIED', 'REJECTED'],
       default: 'NOT_STARTED',
       index: true
-    }
+    },
+
+    isOnline: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    lastSeenAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true

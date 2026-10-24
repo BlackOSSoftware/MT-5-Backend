@@ -151,7 +151,7 @@ export async function closePosition(req, res) {
     const result = tradeEngine.squareOffPosition({
       accountId,
       positionId,
-      reason: "MANUAL_CLOSE",
+      reason: "MANUAL",
       closeTicket: await nextOrderTicket(),
     });
 

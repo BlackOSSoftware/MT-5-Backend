@@ -71,8 +71,15 @@ const normalizeMarket = (v) =>
     .toLowerCase();
 const normalizeFeedMarket = (v) => {
   const market = normalizeMarket(v);
-  if (market === "stock") return "stock";
-  return "crypto";
+  // Only crypto symbols use AllTick crypto WS; forex/metal/indices/energy use stock WS.
+  if (market === "crypto") return "crypto";
+  return "stock";
+};
+
+const marketsForFeed = (feedMarket) => {
+  const feed = normalizeFeedMarket(feedMarket);
+  if (feed === "crypto") return ["crypto"];
+  return ["stock", "forex", "metal", "indices", "energy"];
 };
 const normalizeSymbol = (v) =>
   String(v || "")
@@ -211,7 +218,9 @@ async function pushSilverFallbackTick() {
     };
 
     broadcastData("crypto", data);
+    broadcastData("metal", data);
     broadcastData("crypto", { ...data, code: "XAGUSD" });
+    broadcastData("metal", { ...data, code: "XAGUSD" });
     feedEnginePrice(data);
   } catch (err) {
     WARN("[SILVER-FALLBACK] failed", err?.message || err);
@@ -926,7 +935,14 @@ function broadcastData(market, data) {
   const symbol = normalizeSymbol(raw);
   if (!symbol) return;
 
-  const keys = new Set([makeKey(market, symbol), makeKey(feedMarket, symbol)]);
+  // Match clients subscribed under any UI market that shares this AllTick feed
+  // (e.g. metal/forex → stock feed).
+  const keys = new Set();
+  for (const m of marketsForFeed(feedMarket)) {
+    keys.add(makeKey(m, symbol));
+  }
+  keys.add(makeKey(market, symbol));
+  keys.add(makeKey(feedMarket, symbol));
 
   const bestBidRaw = data?.bids?.[0]?.price;
   const bestAskRaw = data?.asks?.[0]?.price;
@@ -1336,7 +1352,8 @@ export async function handleClientMessage(clientWs, msg) {
         wsStock.subscribe(symbol, 5, providerSymbol);
       }
 
-      if (feedMarket === "crypto") {
+      // Silver may arrive via metal/stock UI market; keep Yahoo fallback available.
+      if (feedMarket === "crypto" || subscribeSymbols.some(isSilverSymbol)) {
         startSilverFallbackIfNeeded(subscribeSymbols);
       }
 
@@ -1367,6 +1384,28 @@ export async function handleClientMessage(clientWs, msg) {
         }
       }
 
+      // Prefer last engine tick; fall back to seed bid/ask/dayClose when market is closed.
+      let lastBid = null;
+      let lastAsk = null;
+      for (const subSymbol of subscribeSymbols) {
+        const eng =
+          (isSilverSymbol(subSymbol)
+            ? findSymbolInEngine("SILVER") || findSymbolInEngine("XAGUSD")
+            : findSymbolInEngine(subSymbol)) || findSymbolInEngine(symbol);
+        const bid = safeNum(eng?.bid ?? eng?.rawBid);
+        const ask = safeNum(eng?.ask ?? eng?.rawAsk);
+        if (Number.isFinite(bid) && bid > 0) lastBid = bid;
+        if (Number.isFinite(ask) && ask > 0) lastAsk = ask;
+        if (lastBid != null && lastAsk != null) break;
+      }
+      const seedBid = safeNum(seed?.bid);
+      const seedAsk = safeNum(seed?.ask);
+      const seedClose = safeNum(seed?.dayClose);
+      if (lastBid == null && Number.isFinite(seedBid) && seedBid > 0) lastBid = seedBid;
+      if (lastAsk == null && Number.isFinite(seedAsk) && seedAsk > 0) lastAsk = seedAsk;
+      if (lastBid == null && Number.isFinite(seedClose) && seedClose > 0) lastBid = seedClose;
+      if (lastAsk == null && Number.isFinite(seedClose) && seedClose > 0) lastAsk = seedClose;
+
       try {
         clientWs.send(
           JSON.stringify({
@@ -1379,8 +1418,11 @@ export async function handleClientMessage(clientWs, msg) {
             dayHigh: seed?.dayHigh ?? null,
             dayLow: seed?.dayLow ?? null,
             dayClose: seed?.dayClose ?? null,
-            bid: seed?.bid ?? null,
-            ask: seed?.ask ?? null,
+            previousClose: seed?.previousClose ?? seed?.dayClose ?? null,
+            bid: lastBid ?? seed?.bid ?? null,
+            ask: lastAsk ?? seed?.ask ?? null,
+            lastBid,
+            lastAsk,
           }),
         );
       } catch (err) {

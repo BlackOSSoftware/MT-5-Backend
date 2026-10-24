@@ -37,13 +37,75 @@ const PENDING_ORDER_HISTORY_STATUSES = [
 ];
 const PENDING_ORDER_REJECTED_STATUSES = ["CANCELLED", "EXPIRED", "FAILED"];
 
+const toObjectIdList = (values) => {
+  const ids = [];
+  const seen = new Set();
+  for (const value of values) {
+    const raw = String(value ?? "").trim();
+    if (!raw || seen.has(raw) || !mongoose.isValidObjectId(raw)) continue;
+    seen.add(raw);
+    ids.push(new mongoose.Types.ObjectId(raw));
+  }
+  return ids;
+};
+
+/**
+ * Attach human-readable labels so admin UI does not show raw Mongo ObjectIds.
+ * Keeps original userId/accountId for filters, routing, and actions.
+ */
+const attachUserAccountLabels = async (
+  items,
+  { userKey = "userId", accountKey = "accountId" } = {}
+) => {
+  if (!Array.isArray(items) || items.length === 0) return items;
+
+  const userIds = toObjectIdList(items.map((item) => item?.[userKey]));
+  const accountIds = toObjectIdList(items.map((item) => item?.[accountKey]));
+
+  const [users, accounts] = await Promise.all([
+    userIds.length
+      ? User.find({ _id: { $in: userIds } }).select("name email").lean()
+      : [],
+    accountIds.length
+      ? Account.find({ _id: { $in: accountIds } })
+          .select("account_number")
+          .lean()
+      : [],
+  ]);
+
+  const userMap = new Map(
+    users.map((u) => [String(u._id), { name: u.name || "", email: u.email || "" }])
+  );
+  const accountMap = new Map(
+    accounts.map((a) => [String(a._id), a.account_number || ""])
+  );
+
+  return items.map((item) => {
+    const userId = String(item?.[userKey] ?? "");
+    const accountId = String(item?.[accountKey] ?? "");
+    const user = userMap.get(userId);
+    const accountNumber = accountMap.get(accountId) || "";
+
+    return {
+      ...item,
+      userName: user?.name || "",
+      userEmail: user?.email || "",
+      accountNumber,
+      // camel + snake for mixed admin payloads
+      account_number: accountNumber,
+      user_name: user?.name || "",
+      user_email: user?.email || "",
+    };
+  });
+};
+
 export const getTradeAdminSummaryService = async () => {
   const [activePositions, pendingOrders, activeUsers, activeTradingAccountIds] =
     await Promise.all([
-      Trade.countDocuments({ status: "OPEN" }),
-      PendingOrder.countDocuments({ status: "PENDING" }),
+      Trade.countDocuments({ status: "OPEN", isDeleted: { $ne: true } }),
+      PendingOrder.countDocuments({ status: "PENDING", isDeleted: { $ne: true } }),
       User.countDocuments({}),
-      Trade.distinct("accountId", { status: "OPEN" })
+      Trade.distinct("accountId", { status: "OPEN", isDeleted: { $ne: true } })
     ]);
 
   return {
@@ -252,6 +314,7 @@ export const adminListClosedTradesService = async (query = {}) => {
 
   const match = {
     status: "CLOSED",
+    isDeleted: { $ne: true },
   };
 
   if (query.userId !== undefined) {
@@ -350,6 +413,8 @@ export const adminListClosedTradesService = async (query = {}) => {
               ipAddress: 1,
 
               positionId: 1,
+              ticket: 1,
+              closeTicket: 1,
               symbol: 1,
               side: 1,
               orderType: 1,
@@ -403,9 +468,12 @@ export const adminListClosedTradesService = async (query = {}) => {
   const row = agg?.[0] || { items: [], total: 0 };
   const totalRaw = Number(row.total);
   const total = Number.isFinite(totalRaw) ? totalRaw : 0;
+  const items = await attachUserAccountLabels(
+    Array.isArray(row.items) ? row.items : []
+  );
 
   return {
-    items: Array.isArray(row.items) ? row.items : [],
+    items,
     pagination: {
       page,
       limit,
@@ -433,6 +501,7 @@ export const adminListOpenTradesService = async (query = {}) => {
 
   const match = {
     status: "OPEN",
+    isDeleted: { $ne: true },
   };
 
   if (query.userId !== undefined) {
@@ -531,6 +600,8 @@ export const adminListOpenTradesService = async (query = {}) => {
               ipAddress: 1,
 
               positionId: 1,
+              ticket: 1,
+              closeTicket: 1,
               symbol: 1,
               side: 1,
               orderType: 1,
@@ -584,9 +655,12 @@ export const adminListOpenTradesService = async (query = {}) => {
   const row = agg?.[0] || { items: [], total: 0 };
   const totalRaw = Number(row.total);
   const total = Number.isFinite(totalRaw) ? totalRaw : 0;
+  const items = await attachUserAccountLabels(
+    Array.isArray(row.items) ? row.items : []
+  );
 
   return {
-    items: Array.isArray(row.items) ? row.items : [],
+    items,
     pagination: {
       page,
       limit,
@@ -614,6 +688,7 @@ export const adminListPendingOrdersOpenService = async (query = {}) => {
 
   const match = {
     status: "PENDING",
+    isDeleted: { $ne: true },
   };
 
   if (query.userId !== undefined) {
@@ -711,6 +786,7 @@ export const adminListPendingOrdersOpenService = async (query = {}) => {
               accountId: 1,
 
               orderId: 1,
+              ticket: 1,
               executedPositionId: 1,
 
               symbol: 1,
@@ -757,9 +833,12 @@ export const adminListPendingOrdersOpenService = async (query = {}) => {
   const row = agg?.[0] || { items: [], total: 0 };
   const totalRaw = Number(row.total);
   const total = Number.isFinite(totalRaw) ? totalRaw : 0;
+  const items = await attachUserAccountLabels(
+    Array.isArray(row.items) ? row.items : []
+  );
 
   return {
-    items: Array.isArray(row.items) ? row.items : [],
+    items,
     pagination: {
       page,
       limit,
@@ -916,6 +995,7 @@ export const adminListPendingOrdersHistoryService = async (query = {}) => {
               accountId: 1,
 
               orderId: 1,
+              ticket: 1,
               executedPositionId: 1,
 
               symbol: 1,
@@ -962,9 +1042,12 @@ export const adminListPendingOrdersHistoryService = async (query = {}) => {
   const row = agg?.[0] || { items: [], total: 0 };
   const totalRaw = Number(row.total);
   const total = Number.isFinite(totalRaw) ? totalRaw : 0;
+  const items = await attachUserAccountLabels(
+    Array.isArray(row.items) ? row.items : []
+  );
 
   return {
-    items: Array.isArray(row.items) ? row.items : [],
+    items,
     pagination: {
       page,
       limit,
@@ -1011,7 +1094,7 @@ export const adminListBrokerageService = async (query = {}) => {
     if (toValid) filter.createdAt.$lte = to;
   }
 
-  const [items, total] = await Promise.all([
+  const [rawItems, total] = await Promise.all([
     Brokerage.find(filter)
       .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
@@ -1019,6 +1102,11 @@ export const adminListBrokerageService = async (query = {}) => {
       .lean(),
     Brokerage.countDocuments(filter),
   ]);
+
+  const items = await attachUserAccountLabels(rawItems, {
+    userKey: "user_id",
+    accountKey: "account_id",
+  });
 
   return {
     items,

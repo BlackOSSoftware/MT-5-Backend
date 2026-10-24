@@ -11,10 +11,14 @@ import {
   adminListPendingOrdersHistory,
   adminListPendingOrdersOpen,
   adminListUsersFunds,
+  adminDeleteTrade,
+  adminListDeletedTrades,
+  adminModifyClosedTrade,
   adminModifyPendingOrder,
   adminModifyPosition,
   adminPlaceMarketOrder,
   adminPlacePendingOrder,
+  adminRestoreTrade,
   getTradeAdminSummary,
 } from "../../controllers/tradeAdmin.controller.js";
 
@@ -96,6 +100,22 @@ router.post("/trade/pending/cancel", authMiddleware, adminAuth, adminCancelPendi
 // Modify open position
 // PATCH /api/v1/trade-admin/trade/position/modify
 router.patch("/trade/position/modify", authMiddleware, adminAuth, adminModifyPosition);
+
+// Modify closed trade (history overwrite + balance delta)
+// PATCH /api/v1/trade-admin/trade/closed/modify
+router.patch("/trade/closed/modify", authMiddleware, adminAuth, adminModifyClosedTrade);
+
+// Soft-delete live / pending / closed trade (PnL adjust for closed)
+// POST /api/v1/trade-admin/trade/delete
+router.post("/trade/delete", authMiddleware, adminAuth, adminDeleteTrade);
+
+// Restore soft-deleted trade
+// POST /api/v1/trade-admin/trade/restore
+router.post("/trade/restore", authMiddleware, adminAuth, adminRestoreTrade);
+
+// List soft-deleted trades
+// GET /api/v1/trade-admin/trades/deleted
+router.get("/trades/deleted", authMiddleware, adminAuth, adminListDeletedTrades);
 
 // Close open position
 // POST /api/v1/trade-admin/trade/position/close

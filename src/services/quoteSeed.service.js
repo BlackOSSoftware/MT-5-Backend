@@ -83,7 +83,7 @@ const fetchDailyKline = async (feedMarket, code) => {
         code,
         kline_type: 8,
         kline_timestamp_end: 0,
-        query_kline_num: 1,
+        query_kline_num: 2,
         adjust_type: 0,
       },
     }),
@@ -100,12 +100,22 @@ const fetchDailyKline = async (feedMarket, code) => {
     if (json?.ret !== 200) return null;
     const list = json?.data?.kline_list;
     if (!Array.isArray(list) || list.length === 0) return null;
-    const item = list[0];
+    const bars = [...list].sort(
+      (a, b) => Number(b?.timestamp || 0) - Number(a?.timestamp || 0),
+    );
+    const today = bars[0];
+    const prev = bars[1] || null;
+    const open = num(today?.open_price);
+    const previousClose =
+      num(prev?.close_price) ?? open ?? num(today?.close_price);
     return {
-      open: num(item?.open_price),
-      high: num(item?.high_price),
-      low: num(item?.low_price),
-      close: num(item?.close_price),
+      open,
+      high: num(today?.high_price),
+      low: num(today?.low_price),
+      // previous session close for day change (not today's live close)
+      close: previousClose,
+      previousClose,
+      todayClose: num(today?.close_price),
     };
   } catch {
     return null;
@@ -179,10 +189,21 @@ export async function resolveSeedQuote(symbolRaw) {
     tradeEngine.symbols?.get(symbol) ||
     tradeEngine.symbols?.get(providerCode);
 
-  const close = num(hl?.close);
+  const previousClose =
+    num(hl?.previousClose) || num(hl?.close) || null;
   const open = num(hl?.open);
-  let bid = num(eng?.bid) || num(tick?.bid) || close || num(tick?.price);
-  let ask = num(eng?.ask) || num(tick?.ask) || close || num(tick?.price);
+  let bid =
+    num(eng?.bid) ||
+    num(tick?.bid) ||
+    num(hl?.todayClose) ||
+    previousClose ||
+    num(tick?.price);
+  let ask =
+    num(eng?.ask) ||
+    num(tick?.ask) ||
+    num(hl?.todayClose) ||
+    previousClose ||
+    num(tick?.price);
 
   if (!bid && !ask) return null;
 
@@ -195,6 +216,8 @@ export async function resolveSeedQuote(symbolRaw) {
     dayOpen: open || null,
     dayHigh: num(hl?.high) || null,
     dayLow: num(hl?.low) || null,
-    dayClose: close || bid,
+    // dayClose = previous session close (reference for change / change%)
+    dayClose: previousClose || open || bid,
+    previousClose: previousClose || open || null,
   };
 }

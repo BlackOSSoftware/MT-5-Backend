@@ -45,7 +45,7 @@ const fetchDailyKline = async (feedMarket, code) => {
         code,
         kline_type: 8,
         kline_timestamp_end: 0,
-        query_kline_num: 2,
+        query_kline_num: 3,
         adjust_type: 0,
       },
     }),
@@ -66,17 +66,21 @@ const fetchDailyKline = async (feedMarket, code) => {
     const bars = [...list].sort(
       (a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0),
     );
-    const item = bars[0];
-    const open = num(item?.open_price);
-    const high = num(item?.high_price);
-    const low = num(item?.low_price);
-    const close = num(item?.close_price);
-    if (!open && !high && !low && !close) return null;
+    const today = bars[0];
+    const prev = bars[1] || null;
+    const open = num(today?.open_price);
+    const high = num(today?.high_price);
+    const low = num(today?.low_price);
+    const todayClose = num(today?.close_price);
+    const previousClose = num(prev?.close_price) ?? open ?? todayClose;
+    if (!open && !high && !low && !previousClose) return null;
     return {
       open,
       high,
       low,
-      close,
+      close: previousClose,
+      previousClose,
+      todayClose,
       source: "alltick_daily_kline",
     };
   } catch {
@@ -185,10 +189,13 @@ export const getMarketStatisticsService = async (symbolRaw) => {
   const askHigh = high || ask;
   const askLow = low || ask;
 
-  // Day change vs open (MT5-style); fall back to close if open missing.
-  const ref = open || close;
+  // Day change vs previous close (MT5 Market Watch style); fall back to open.
+  const previousClose = num(hl?.previousClose) || close;
+  const ref = previousClose || open;
   const priceChangePct =
     ref && bid ? Number((((bid - ref) / ref) * 100).toFixed(4)) : null;
+  const priceChange =
+    ref && bid ? Number((bid - ref).toFixed(Math.min(8, Number(instrument?.pricePrecision) || 2))) : null;
 
   let source = hl?.source || null;
   if (num(eng?.bid)) source = source ? `${source}+engine` : "engine";
@@ -206,7 +213,9 @@ export const getMarketStatisticsService = async (symbolRaw) => {
     askHigh: askHigh || null,
     askLow: askLow || null,
     open: open || null,
-    close: close || null,
+    close: previousClose || close || null,
+    previousClose: previousClose || null,
+    priceChange,
     priceChangePct,
     source,
   };

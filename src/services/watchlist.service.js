@@ -107,11 +107,10 @@ export const watchlistService = {
 
   async getDefaultList() {
 
-    //  Fast return from Redis
+    // Fast return from Redis (ignore empty cache — it can hide a real DB list)
     const cached = await getRedisJSON(REDIS_DEFAULT_KEY);
 
-    if (Array.isArray(cached)) {
-
+    if (Array.isArray(cached) && cached.length > 0) {
       return cached
         .filter((x) => x && typeof x === "object")
         .map((x) => ({

@@ -3,9 +3,13 @@ import dns from 'node:dns';
 
 function configureDnsServers() {
   const configured = process.env.DNS_SERVERS;
-  if (!configured) return;
+  const current = dns.getServers();
+  const onlyLoopback =
+    current.length > 0 &&
+    current.every((s) => s === '127.0.0.1' || s === '::1');
 
-  const servers = configured
+  // Prefer explicit env; otherwise bypass broken local DNS (common Windows/Docker setup)
+  const servers = (configured || (onlyLoopback ? '8.8.8.8,1.1.1.1' : ''))
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);

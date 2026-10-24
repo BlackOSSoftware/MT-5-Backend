@@ -16,7 +16,10 @@ const activityLogSchema = new mongoose.Schema(
         'USER_CREATED',
         'PASSWORD_CHANGED',
         'PASSWORD_RESET',
-        'PASSWORD_CHANGED_BY_ADMIN'
+        'PASSWORD_CHANGED_BY_ADMIN',
+        'TRADE_CLOSED_EDITED_BY_ADMIN',
+        'TRADE_DELETED_BY_ADMIN',
+        'TRADE_RESTORED_BY_ADMIN'
       ],
       index: true
     },

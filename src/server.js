@@ -139,6 +139,17 @@ async function start() {
   // =========================
   // 6️⃣ START SERVER
   // =========================
+  server.on("error", (err) => {
+    if (err && err.code === "EADDRINUSE") {
+      console.error(
+        `Port ${PORT} already in use. Stop the other backend (or kill the process on :${PORT}) and restart once.`
+      );
+      process.exit(1);
+    }
+    console.error("HTTP server error:", err);
+    process.exit(1);
+  });
+
   server.listen(PORT, () => {
     console.log(`Server running at http://localhost:${PORT}`);
     console.log(`WebSocket Market WS at ws://localhost:${PORT}/ws/market`);

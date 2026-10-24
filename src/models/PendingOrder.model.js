@@ -152,6 +152,28 @@ const PendingOrderSchema = new mongoose.Schema(
       type: Object,
       default: {},
     },
+
+    /* =========================
+       ADMIN SOFT DELETE
+    ========================== */
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    deleteBalanceDelta: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,
@@ -169,6 +191,7 @@ PendingOrderSchema.index({ symbol: 1, status: 1 });
 PendingOrderSchema.index({ orderType: 1, status: 1 });
 PendingOrderSchema.index({ expireAt: 1 });
 PendingOrderSchema.index({ status: 1, createdAt: -1 });
+PendingOrderSchema.index({ isDeleted: 1, deletedAt: -1 });
 
 const PendingOrder = mongoose.model("PendingOrder", PendingOrderSchema);
 export default PendingOrder;

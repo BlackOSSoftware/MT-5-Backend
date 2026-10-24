@@ -20,7 +20,8 @@ import redis, { isRedisReady } from "../config/redis.js";
 const normalizeMarket = (v) => String(v || "").trim().toLowerCase();
 
 const makeKey = (market, symbol) => {
-  return `dayhl:${normalizeMarket(market)}:${normalizeProviderCode(symbol)}`;
+  // v2: close = previous session close (for day change), not today's live close
+  return `dayhl:v2:${normalizeMarket(market)}:${normalizeProviderCode(symbol)}`;
 };
 
 const getDayStringIST = () => {
@@ -82,7 +83,7 @@ const fetchDayHighLowFromAllTick = async (market, symbol) => {
     };
   }
 
-  // Daily Kline = 8
+  // Daily Kline = 8 — need 2 bars: today (OHL) + previous day (close for change %)
   const body = {
     trace: buildTrace(),
     data: {
@@ -91,7 +92,7 @@ const fetchDayHighLowFromAllTick = async (market, symbol) => {
           code: s,
           kline_type: 8,
           kline_timestamp_end: 0,
-          query_kline_num: 1,
+          query_kline_num: 2,
           adjust_type: 0,
         },
       ],
@@ -148,19 +149,28 @@ const fetchDayHighLowFromAllTick = async (market, symbol) => {
     };
   }
 
-  const item = klineData[0];
+  // Newest first by timestamp (AllTick order varies).
+  const bars = [...klineData].sort(
+    (a, b) => Number(b?.timestamp || 0) - Number(a?.timestamp || 0),
+  );
+  const today = bars[0];
+  const prev = bars[1] || null;
 
-  // ✅ OHLC
-  const open = safeNumber(item?.open_price);
-  const high = safeNumber(item?.high_price);
-  const low = safeNumber(item?.low_price);
-  const close = safeNumber(item?.close_price);
+  const open = safeNumber(today?.open_price);
+  const high = safeNumber(today?.high_price);
+  const low = safeNumber(today?.low_price);
+  const todayClose = safeNumber(today?.close_price);
+  // Previous session close — used for absolute + % day change on quotes.
+  const previousClose =
+    safeNumber(prev?.close_price) ??
+    safeNumber(today?.open_price) ??
+    todayClose;
 
   if (
     open === null ||
     high === null ||
     low === null ||
-    close === null
+    previousClose === null
   ) {
     return {
       error: {
@@ -178,7 +188,10 @@ const fetchDayHighLowFromAllTick = async (market, symbol) => {
       open,
       high,
       low,
-      close,
+      // `close` kept as previousClose so existing dayClose consumers stay correct
+      close: previousClose,
+      previousClose,
+      todayClose,
       source: "alltick_daily_kline",
       updatedAt: Date.now(),
     },
@@ -315,7 +328,7 @@ export const HighLowService = {
           "MATCH",
           "dayhl:*",
           "COUNT",
-          "200"
+          "200" // includes dayhl:v2:*
         );
 
         const nextCursor = Array.isArray(reply)

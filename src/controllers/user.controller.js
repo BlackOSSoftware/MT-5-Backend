@@ -1,5 +1,10 @@
 import UserDevice from '../models/UserDevice.model.js';
 import { adminDeleteUserService, adminGetUserProfileService, adminListUsersService, adminUpdateUserService, getMyProfileService, updateMyProfileService, searchUsersService } from '../services/user.service.js';
+import {
+  attachPresenceFields,
+  markUserOffline,
+  markUserOnline,
+} from '../services/presence.service.js';
 
 export async function getMyProfile(req, res) {
   const data = await getMyProfileService(req.user._id);
@@ -97,10 +102,13 @@ export async function saveFcmToken(req, res) {
 export async function adminSearchUsers(req, res) {
   try {
     const data = await searchUsersService(req.query);
+    const now = Date.now();
 
     return res.json({
       success: true,
-      data
+      data: Array.isArray(data)
+        ? data.map((item) => attachPresenceFields(item, now))
+        : data,
     });
   } catch (err) {
     return res.status(400).json({
@@ -128,13 +136,44 @@ export async function adminUpdateUser(req, res) {
   }
 }
 
+export async function heartbeatPresence(req, res) {
+  try {
+    const data = await markUserOnline(req.user._id);
+    return res.json({
+      success: true,
+      data: attachPresenceFields(data),
+    });
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      message: err.message || 'Failed to update presence',
+    });
+  }
+}
+
+export async function markPresenceOffline(req, res) {
+  try {
+    const data = await markUserOffline(req.user._id);
+    return res.json({
+      success: true,
+      data: attachPresenceFields(data),
+    });
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      message: err.message || 'Failed to update presence',
+    });
+  }
+}
+
 export async function adminListUsers(req, res) {
   try {
     const data = await adminListUsersService(req.query);
+    const now = Date.now();
 
     return res.json({
       success: true,
-      data: data.items,
+      data: (data.items || []).map((item) => attachPresenceFields(item, now)),
       pagination: data.pagination
     });
   } catch (err) {
@@ -159,7 +198,7 @@ export async function adminGetUserProfile(req, res) {
 
     return res.json({
       success: true,
-      data
+      data: attachPresenceFields(data),
     });
   } catch (err) {
     return res.status(400).json({

@@ -185,6 +185,7 @@ const TradeSchema = new mongoose.Schema(
       type: String,
       enum: [
         "MANUAL",
+        "MANUAL_CLOSE",
         "STOP_LOSS",
         "TAKE_PROFIT",
         "STOP_OUT",
@@ -207,6 +208,29 @@ const TradeSchema = new mongoose.Schema(
       type: Object,
       default: {},
     },
+
+    /* =========================
+       ADMIN SOFT DELETE
+    ========================== */
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    /** Balance delta applied at delete time (restore applies the opposite). */
+    deleteBalanceDelta: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,
@@ -226,6 +250,7 @@ TradeSchema.index({ positionId: 1 });
 TradeSchema.index({ openTime: -1 });
 TradeSchema.index({ status: 1, openTime: -1 });
 TradeSchema.index({ status: 1, closeTime: -1 });
+TradeSchema.index({ isDeleted: 1, deletedAt: -1 });
 
 const Trade = mongoose.model("Trade", TradeSchema);
 export default Trade;

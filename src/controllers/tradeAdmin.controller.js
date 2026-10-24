@@ -4,6 +4,7 @@ import Account from "../models/Account.model.js";
 import { nextOrderTicket } from "../services/orderTicket.service.js";
 import Instrument from "../models/Instrument.model.js";
 import Trade from "../models/Trade.model.js";
+import PendingOrder from "../models/PendingOrder.model.js";
 import Transaction from "../models/Transaction.model.js";
 import { tradeEngine } from "../trade-engine/bootstrap.js";
 import { publishAccountBalance } from "../trade-engine/EngineSyncBus.js";
@@ -16,6 +17,17 @@ import {
   adminListUsersFundsService,
   getTradeAdminSummaryService,
 } from "../services/tradeAdmin.service.js";
+import {
+  normalizeLivePositionEdit,
+  normalizePendingOrderEdit,
+  resolveOptionalField,
+} from "../services/adminTradeEdit.validation.js";
+import { adminEditClosedTradeService } from "../services/adminClosedTradeEdit.service.js";
+import {
+  adminDeleteTradeService,
+  adminListDeletedTradesService,
+  adminRestoreTradeService,
+} from "../services/adminTradeDelete.service.js";
 
 function normalizeSymbol(symbol) {
   return String(symbol || "").trim().toUpperCase();
@@ -128,6 +140,135 @@ function ensureEngineAccountLoaded(accountDoc, ipAddress = "SYSTEM") {
   }
 
   return engineAccount;
+}
+
+function findEnginePosition(account, positionKey) {
+  if (!account?.positions) return null;
+  const key = String(positionKey || "");
+  if (!key) return null;
+
+  const direct = account.positions.get(key);
+  if (direct) return { positionId: key, position: direct };
+
+  if (/^\d+$/.test(key)) {
+    const ticket = Number(key);
+    for (const [id, pos] of account.positions.entries()) {
+      if (Number(pos.ticket) === ticket) {
+        return { positionId: id, position: pos };
+      }
+    }
+  }
+
+  return null;
+}
+
+async function ensureInstrumentLoaded(symbol) {
+  const code = String(symbol || "").trim().toUpperCase();
+  if (!code) return;
+  if (tradeEngine.symbols.get(code) || tradeEngine.symbols.get(symbol)) return;
+
+  const instrument = await Instrument.findOne({ code }).lean();
+  if (!instrument) return;
+
+  tradeEngine.loadSymbol(instrument.code, {
+    segment: instrument.segment
+      ? String(instrument.segment).trim().toLowerCase()
+      : undefined,
+    contractSize: instrument.contractSize,
+    maxLeverage: instrument.maxLeverage || 2000,
+    spread: Number(instrument.spread) || 0,
+    spread_mode:
+      typeof instrument.spread_mode === "string"
+        ? instrument.spread_mode.trim().toUpperCase()
+        : "ADD_ON",
+    tickSize: Number(instrument.tickSize) || 0,
+    pricePrecision:
+      typeof instrument.pricePrecision === "number"
+        ? instrument.pricePrecision
+        : undefined,
+  });
+}
+
+async function ensureOpenPositionInEngine(accountDoc, positionKey, ipAddress) {
+  const accountId = String(accountDoc._id);
+  ensureEngineAccountLoaded(accountDoc, ipAddress);
+
+  let engineAccount = tradeEngine.accounts.get(accountId);
+  let found = findEnginePosition(engineAccount, positionKey);
+  if (found) {
+    await ensureInstrumentLoaded(found.position.symbol);
+    return found.positionId;
+  }
+
+  const key = String(positionKey || "").trim();
+  const accountObjectId = accountDoc._id;
+
+  let trade = await Trade.findOne({
+    accountId: accountObjectId,
+    status: "OPEN",
+    positionId: key,
+  }).lean();
+
+  if (!trade && /^\d+$/.test(key)) {
+    trade = await Trade.findOne({
+      accountId: accountObjectId,
+      status: "OPEN",
+      ticket: Number(key),
+    }).lean();
+  }
+
+  if (!trade) {
+    throw new Error("Position not found");
+  }
+
+  await ensureInstrumentLoaded(trade.symbol);
+  tradeEngine.loadOpenPosition(trade);
+  engineAccount = tradeEngine.accounts.get(accountId);
+  found = findEnginePosition(engineAccount, trade.positionId);
+  if (!found) {
+    throw new Error("Position not found");
+  }
+
+  return found.positionId;
+}
+
+async function ensurePendingOrderInEngine(accountDoc, orderKey, ipAddress) {
+  const accountId = String(accountDoc._id);
+  ensureEngineAccountLoaded(accountDoc, ipAddress);
+
+  let engineAccount = tradeEngine.accounts.get(accountId);
+  const key = String(orderKey || "").trim();
+
+  if (engineAccount?.pendingOrders?.get(key)) return key;
+
+  if (engineAccount?.pendingOrders && /^\d+$/.test(key)) {
+    const ticket = Number(key);
+    for (const [id, order] of engineAccount.pendingOrders.entries()) {
+      if (Number(order.ticket) === ticket) return id;
+    }
+  }
+
+  let order = await PendingOrder.findOne({
+    accountId: accountDoc._id,
+    status: "PENDING",
+    orderId: key,
+  }).lean();
+
+  if (!order && /^\d+$/.test(key)) {
+    order = await PendingOrder.findOne({
+      accountId: accountDoc._id,
+      status: "PENDING",
+      ticket: Number(key),
+    }).lean();
+  }
+
+  if (!order) {
+    throw new Error("Pending order not found");
+  }
+
+  await ensureInstrumentLoaded(order.symbol);
+  tradeEngine.loadPendingOrder(order);
+  return String(order.orderId);
 }
 
 export const getTradeAdminSummary = async (req, res) => {
@@ -393,7 +534,7 @@ export const adminPlacePendingOrder = async (req, res) => {
 
 export const adminModifyPendingOrder = async (req, res) => {
   try {
-    const { accountId, userId, orderId, price, stopLoss, takeProfit } =
+    const { accountId, userId, orderId, price, volume, stopLoss, takeProfit } =
       req.body || {};
 
     if (!accountId || !userId || !orderId) {
@@ -403,23 +544,36 @@ export const adminModifyPendingOrder = async (req, res) => {
       });
     }
 
-    if (price === undefined && stopLoss === undefined && takeProfit === undefined) {
-      return res.status(400).json({
-        success: false,
-        message: "At least one of price, stopLoss, takeProfit is required",
-      });
-    }
+    const normalized = normalizePendingOrderEdit({
+      price,
+      volume,
+      stopLoss,
+      takeProfit,
+    });
 
     const account = await getAccountForAdminTrade({ userId, accountId });
     const ip = getRequestIp(req);
-    ensureEngineAccountLoaded(account, ip);
+    const resolvedOrderId = await ensurePendingOrderInEngine(
+      account,
+      orderId,
+      ip
+    );
 
     const updated = tradeEngine.modifyPendingOrder({
       accountId: String(account._id),
-      orderId: String(orderId),
-      price: toMaybeFiniteNumber(price, "price"),
-      stopLoss: toMaybeFiniteNumber(stopLoss, "stopLoss"),
-      takeProfit: toMaybeFiniteNumber(takeProfit, "takeProfit"),
+      orderId: resolvedOrderId,
+      price:
+        normalized.price.kind === "set" ? normalized.price.value : undefined,
+      volume:
+        normalized.volume.kind === "set" ? normalized.volume.value : undefined,
+      stopLoss:
+        normalized.stopLoss.kind === "omit"
+          ? undefined
+          : resolveOptionalField(normalized.stopLoss, null),
+      takeProfit:
+        normalized.takeProfit.kind === "omit"
+          ? undefined
+          : resolveOptionalField(normalized.takeProfit, null),
     });
 
     return res.json({ success: true, data: updated });
@@ -459,7 +613,15 @@ export const adminCancelPendingOrder = async (req, res) => {
 
 export const adminModifyPosition = async (req, res) => {
   try {
-    const { accountId, userId, positionId, stopLoss, takeProfit } = req.body || {};
+    const {
+      accountId,
+      userId,
+      positionId,
+      volume,
+      openPrice,
+      stopLoss,
+      takeProfit,
+    } = req.body || {};
 
     if (!accountId || !userId || !positionId) {
       return res.status(400).json({
@@ -468,29 +630,117 @@ export const adminModifyPosition = async (req, res) => {
       });
     }
 
-    if (stopLoss === undefined && takeProfit === undefined) {
-      return res.status(400).json({
-        success: false,
-        message: "At least one of stopLoss or takeProfit is required",
-      });
-    }
+    const normalized = normalizeLivePositionEdit({
+      volume,
+      openPrice,
+      stopLoss,
+      takeProfit,
+    });
 
     const account = await getAccountForAdminTrade({ userId, accountId });
     const ip = getRequestIp(req);
-    ensureEngineAccountLoaded(account, ip);
+    const resolvedPositionId = await ensureOpenPositionInEngine(
+      account,
+      positionId,
+      ip
+    );
 
     const result = tradeEngine.modifyPosition({
       accountId: String(account._id),
-      positionId: String(positionId),
-      stopLoss: toMaybeFiniteNumber(stopLoss, "stopLoss"),
-      takeProfit: toMaybeFiniteNumber(takeProfit, "takeProfit"),
+      positionId: resolvedPositionId,
+      volume:
+        normalized.volume.kind === "set" ? normalized.volume.value : undefined,
+      openPrice:
+        normalized.openPrice.kind === "set"
+          ? normalized.openPrice.value
+          : undefined,
+      stopLoss:
+        normalized.stopLoss.kind === "omit"
+          ? undefined
+          : resolveOptionalField(normalized.stopLoss, null),
+      takeProfit:
+        normalized.takeProfit.kind === "omit"
+          ? undefined
+          : resolveOptionalField(normalized.takeProfit, null),
     });
+
+    // Persist immediately so admin list/PnL refetch is not racing LedgerQueue.
+    await Trade.updateOne(
+      { positionId: result.positionId, status: "OPEN" },
+      {
+        $set: {
+          volume: result.volume,
+          openPrice: result.openPrice,
+          entryPrice: result.openPrice,
+          stopLoss: result.stopLoss ?? null,
+          takeProfit: result.takeProfit ?? null,
+          grossPnL: Number(result.floatingPnL) || 0,
+        },
+      }
+    );
 
     return res.json({ success: true, data: result });
   } catch (error) {
     return res.status(400).json({
       success: false,
       message: error.message,
+    });
+  }
+};
+
+export const adminModifyClosedTrade = async (req, res) => {
+  try {
+    const actorId = req.user?._id || req.user?.id || null;
+    const result = await adminEditClosedTradeService(req.body || {}, {
+      actorId,
+    });
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Closed trade edit failed",
+    });
+  }
+};
+
+export const adminDeleteTrade = async (req, res) => {
+  try {
+    const actorId = req.user?._id || req.user?.id || null;
+    const result = await adminDeleteTradeService(req.body || {}, { actorId });
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Trade delete failed",
+    });
+  }
+};
+
+export const adminRestoreTrade = async (req, res) => {
+  try {
+    const actorId = req.user?._id || req.user?.id || null;
+    const result = await adminRestoreTradeService(req.body || {}, { actorId });
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Trade restore failed",
+    });
+  }
+};
+
+export const adminListDeletedTrades = async (req, res) => {
+  try {
+    const result = await adminListDeletedTradesService(req.query || {});
+    return res.json({
+      success: true,
+      data: result.items,
+      pagination: result.pagination,
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Failed to list deleted trades",
     });
   }
 };
@@ -508,11 +758,15 @@ export const adminClosePosition = async (req, res) => {
 
     const account = await getAccountForAdminTrade({ userId, accountId });
     const ip = getRequestIp(req);
-    ensureEngineAccountLoaded(account, ip);
+    const resolvedPositionId = await ensureOpenPositionInEngine(
+      account,
+      positionId,
+      ip
+    );
 
     const result = tradeEngine.squareOffPosition({
       accountId: String(account._id),
-      positionId: String(positionId),
+      positionId: resolvedPositionId,
       reason: "MANUAL",
       closeTicket: await nextOrderTicket(),
     });

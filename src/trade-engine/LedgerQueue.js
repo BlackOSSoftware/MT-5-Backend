@@ -180,16 +180,30 @@ class LedgerQueue {
      POSITION MODIFY (SL / TP)
   ========================= */
 
-  async positionModify({ positionId, stopLoss, takeProfit }) {
-    await Trade.updateOne(
-      { positionId, status: "OPEN" },
-      {
-        $set: {
-          stopLoss: stopLoss ?? null,
-          takeProfit: takeProfit ?? null,
-        },
-      },
-    );
+  async positionModify({
+    positionId,
+    stopLoss,
+    takeProfit,
+    volume,
+    openPrice,
+    marginUsed,
+  }) {
+    const $set = {
+      stopLoss: stopLoss ?? null,
+      takeProfit: takeProfit ?? null,
+    };
+    if (typeof volume === "number" && Number.isFinite(volume)) {
+      $set.volume = volume;
+    }
+    if (typeof openPrice === "number" && Number.isFinite(openPrice)) {
+      $set.openPrice = openPrice;
+      $set.entryPrice = openPrice;
+    }
+    if (typeof marginUsed === "number" && Number.isFinite(marginUsed)) {
+      $set.marginUsed = marginUsed;
+    }
+
+    await Trade.updateOne({ positionId, status: "OPEN" }, { $set });
 
     console.log("[LEDGER][POSITION_MODIFY][OK]", positionId);
   }
@@ -411,18 +425,18 @@ class LedgerQueue {
   ========================= */
 
   async pendingModify(order) {
-    await PendingOrder.updateOne(
-      { orderId: order.orderId },
-      {
-        $set: {
-          orderType: order.orderType,
-          price: order.price,
-          limitPrice: order.limitPrice ?? null,
-          stopLoss: order.stopLoss ?? null,
-          takeProfit: order.takeProfit ?? null,
-        },
-      }
-    );
+    const $set = {
+      orderType: order.orderType,
+      price: order.price,
+      limitPrice: order.limitPrice ?? null,
+      stopLoss: order.stopLoss ?? null,
+      takeProfit: order.takeProfit ?? null,
+    };
+    if (typeof order.volume === "number" && Number.isFinite(order.volume)) {
+      $set.volume = order.volume;
+    }
+
+    await PendingOrder.updateOne({ orderId: order.orderId }, { $set });
 
     console.log("[LEDGER][PENDING_MODIFY][OK]", order.orderId);
   }

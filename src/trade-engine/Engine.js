@@ -856,7 +856,14 @@ export class Engine {
      MODIFY PENDING ORDER
   ========================== */
 
-  modifyPendingOrder({ accountId, orderId, price, stopLoss, takeProfit }) {
+  modifyPendingOrder({
+    accountId,
+    orderId,
+    price,
+    volume,
+    stopLoss,
+    takeProfit,
+  }) {
     const account = this.accounts.get(accountId);
 
     if (!account) throw new Error("Invalid account");
@@ -867,10 +874,16 @@ export class Engine {
     if (!order) throw new Error("Pending order not found");
 
     // compute prospective new values (to validate)
+    // undefined = keep; null = clear SL/TP only
     const newPrice = typeof price === "number" ? price : order.price;
-    const newStop = typeof stopLoss === "number" ? stopLoss : order.stopLoss;
+    const newVolume = typeof volume === "number" ? volume : order.volume;
+    const newStop =
+      stopLoss === undefined ? order.stopLoss : stopLoss;
     const newTake =
-      typeof takeProfit === "number" ? takeProfit : order.takeProfit;
+      takeProfit === undefined ? order.takeProfit : takeProfit;
+
+    if (!(Number(newVolume) > 0)) throw new Error("Invalid volume");
+    if (!(Number(newPrice) > 0)) throw new Error("Invalid price");
 
     // get symbol config for validation
     const sym = this.symbols.get(order.symbol);
@@ -890,8 +903,9 @@ export class Engine {
 
     // Apply updates
     if (typeof price === "number") order.price = price;
-    if (typeof stopLoss === "number") order.stopLoss = stopLoss;
-    if (typeof takeProfit === "number") order.takeProfit = takeProfit;
+    if (typeof volume === "number") order.volume = volume;
+    if (stopLoss !== undefined) order.stopLoss = stopLoss;
+    if (takeProfit !== undefined) order.takeProfit = takeProfit;
 
     ledgerQueue.enqueue("ORDER_PENDING_MODIFY", order);
 
@@ -912,15 +926,35 @@ export class Engine {
     return order;
   }
   /* =========================
-   MODIFY OPEN POSITION (SL / TP)
+   MODIFY OPEN POSITION (volume / openPrice / SL / TP)
 ========================== */
 
-  modifyPosition({ accountId, positionId, stopLoss, takeProfit }) {
-    const account = this.accounts.get(accountId);
+  modifyPosition({
+    accountId,
+    positionId,
+    volume,
+    openPrice,
+    stopLoss,
+    takeProfit,
+  }) {
+    const account = this.accounts.get(String(accountId));
 
     if (!account) throw new Error("Invalid account");
 
-    const pos = account.positions.get(positionId);
+    let resolvedId = String(positionId);
+    let pos = account.positions.get(resolvedId);
+
+    // Admin UI may send ticket instead of UUID positionId
+    if (!pos && /^\d+$/.test(resolvedId)) {
+      const ticket = Number(resolvedId);
+      for (const [id, candidate] of account.positions.entries()) {
+        if (Number(candidate.ticket) === ticket) {
+          resolvedId = id;
+          pos = candidate;
+          break;
+        }
+      }
+    }
 
     if (!pos) throw new Error("Position not found");
 
@@ -935,6 +969,12 @@ export class Engine {
     // undefined = jaisa hai waisa rakho, null = hatao, number = naya.
     const nextSl = stopLoss === undefined ? pos.stopLoss : stopLoss;
     const nextTp = takeProfit === undefined ? pos.takeProfit : takeProfit;
+    const nextVolume = typeof volume === "number" ? volume : pos.volume;
+    const nextOpen =
+      typeof openPrice === "number" ? openPrice : pos.openPrice;
+
+    if (!(Number(nextVolume) > 0)) throw new Error("Invalid volume");
+    if (!(Number(nextOpen) > 0)) throw new Error("Invalid openPrice");
 
     // validate new SL/TP
     validateOrder({
@@ -948,15 +988,32 @@ export class Engine {
     });
 
     // apply updates
+    if (typeof volume === "number") pos.volume = volume;
+    if (typeof openPrice === "number") pos.openPrice = openPrice;
     pos.stopLoss = nextSl ?? null;
     pos.takeProfit = nextTp ?? null;
+
+    // refresh floating PnL + account margin after structural edits
+    try {
+      let formatted = { bid, ask };
+      if (typeof this.formatPrice === "function") {
+        formatted = this.formatPrice(account, sym, bid, ask);
+      }
+      pos.updatePnL(formatted.bid, formatted.ask, sym?.contractSize);
+    } catch {
+      pos.updatePnL(bid, ask, sym?.contractSize);
+    }
+    this.recalcUsedMargin(account);
 
     // ledger
     ledgerQueue.enqueue("POSITION_MODIFY", {
       userId: account.userId,
-      accountId,
-      positionId,
+      accountId: String(accountId),
+      positionId: resolvedId,
       symbol: pos.symbol,
+      volume: pos.volume,
+      openPrice: pos.openPrice,
+      marginUsed: pos.marginUsed ?? account.usedMargin,
       stopLoss: pos.stopLoss,
       takeProfit: pos.takeProfit,
       updatedAt: Date.now(),
@@ -965,19 +1022,27 @@ export class Engine {
     // emit update
     try {
       engineEvents.emit("LIVE_POSITION_MODIFY", {
-        accountId,
-        positionId,
+        accountId: String(accountId),
+        positionId: resolvedId,
+        ticket: pos.ticket,
+        volume: pos.volume,
+        openPrice: pos.openPrice,
         stopLoss: pos.stopLoss,
         takeProfit: pos.takeProfit,
+        floatingPnL: pos.floatingPnL,
       });
     } catch (err) {
       console.error("[ENGINE] emit LIVE_POSITION_MODIFY failed", err);
     }
 
     return {
-      positionId,
+      positionId: resolvedId,
+      ticket: pos.ticket,
+      volume: pos.volume,
+      openPrice: pos.openPrice,
       stopLoss: pos.stopLoss,
       takeProfit: pos.takeProfit,
+      floatingPnL: pos.floatingPnL,
     };
   }
 
