@@ -374,6 +374,8 @@ class AlltickWS extends EventEmitter {
     this.isConnecting = false;
     this.reconnectAttempts = 0;
     this.manualClose = false;
+    this._lastSubscribePushAt = 0;
+    this._subscribeBackoffUntil = 0;
   }
 
   nextSeqId() {
@@ -562,20 +564,41 @@ class AlltickWS extends EventEmitter {
 
     if (!symbol || !providerCode) return;
 
+    const existing = this.subscriptions.get(symbol);
+    // Same symbol already tracked — skip re-push (AllTick 605 rate-limit).
+    if (
+      existing &&
+      existing.providerCode === providerCode &&
+      existing.depth === depth &&
+      !this.pendingSubscriptions.has(symbol)
+    ) {
+      return;
+    }
+
     const record = { symbol, providerCode, depth };
     this.subscriptions.set(symbol, record);
     this.pendingSubscriptions.set(symbol, record);
     this.schedulePushSubscription();
   }
 
-  schedulePushSubscription() {
+  schedulePushSubscription(delayMs = 1200) {
     if (this.pushTimer) clearTimeout(this.pushTimer);
-    this.pushTimer = setTimeout(() => this.pushSubscription(), 200);
+    const backoffLeft = Math.max(0, (this._subscribeBackoffUntil || 0) - nowTs());
+    const wait = Math.max(delayMs, backoffLeft);
+    this.pushTimer = setTimeout(() => this.pushSubscription(), wait);
   }
 
   pushSubscription() {
     if (!this.connected || !this.client) return;
     if (this.subscriptions.size === 0) return;
+    if (this.pendingSubscriptions.size === 0) return;
+
+    // Min gap between upstream subscribe pushes (AllTick ret 605).
+    const sinceLast = nowTs() - (this._lastSubscribePushAt || 0);
+    if (sinceLast < 2000) {
+      this.schedulePushSubscription(2000 - sinceLast);
+      return;
+    }
 
     const symbolList = [];
     for (const { providerCode, depth } of this.subscriptions.values()) {
@@ -598,16 +621,25 @@ class AlltickWS extends EventEmitter {
     };
 
     try {
+      this._lastSubscribePushAt = nowTs();
       this.client.send(JSON.stringify(payload));
     } catch (err) {
       ERROR(`[${this.marketName}] pushSubscription send failed`, err && err.message ? err.message : err);
     }
   }
 
+  /** After AllTick 605 / rate limit — retry pending with backoff. */
+  scheduleSubscribeRetry(backoffMs = 5000) {
+    this._subscribeBackoffUntil = nowTs() + backoffMs;
+    if (this.pendingSubscriptions.size > 0) {
+      this.schedulePushSubscription(backoffMs);
+    }
+  }
+
   restoreSubscriptions() {
     if (this.subscriptions.size > 0) {
       this.pendingSubscriptions = new Map(this.subscriptions);
-      this.pushSubscription();
+      this.schedulePushSubscription(500);
     }
   }
 }
@@ -672,6 +704,14 @@ function attachSubscriptionLogs(manager) {
       symbols: subscriptions.map((sub) => sub.providerCode),
     });
     notifyUpstreamSubscribeFailure(manager.marketName, subscriptions, ack);
+    // AllTick 605 too many requests — backoff then retry pending.
+    const ret = Number(ack?.ret);
+    const msg = String(ack?.msg || "").toLowerCase();
+    if (ret === 605 || msg.includes("too many")) {
+      manager.scheduleSubscribeRetry(8000);
+    } else if (manager.pendingSubscriptions.size > 0) {
+      manager.scheduleSubscribeRetry(3000);
+    }
   });
 }
 
@@ -1317,6 +1357,15 @@ export async function handleClientMessage(clientWs, msg) {
         }
       }
 
+      const dayClose = hl?.data?.close ?? null;
+      const dayOpen = hl?.data?.open ?? null;
+      const seed =
+        Number.isFinite(Number(dayClose)) && Number(dayClose) > 0
+          ? Number(dayClose)
+          : Number.isFinite(Number(dayOpen)) && Number(dayOpen) > 0
+            ? Number(dayOpen)
+            : null;
+
       try {
         clientWs.send(
           JSON.stringify({
@@ -1325,10 +1374,13 @@ export async function handleClientMessage(clientWs, msg) {
             providerSymbol,
             subscribeSymbols,
             accountId: clientWs.accountId || null,
-            dayOpen: hl?.data?.open ?? null,
+            dayOpen,
             dayHigh: hl?.data?.high ?? null,
             dayLow: hl?.data?.low ?? null,
-            dayClose: hl?.data?.close ?? null,
+            dayClose,
+            // Closed/weekend markets: last close as bid/ask so UI != 0.00
+            bid: seed,
+            ask: seed,
           }),
         );
       } catch (err) {
