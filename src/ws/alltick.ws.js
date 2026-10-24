@@ -17,6 +17,7 @@ import {
   normalizeProviderCode,
   resolveInstrumentProviderCode,
 } from "../services/instrumentProvider.service.js";
+import { resolveSeedQuote } from "../services/quoteSeed.service.js";
 import { tradeEngine } from "../trade-engine/bootstrap.js";
 import EngineSync from "../trade-engine/EngineSync.js";
 import { engineEvents } from "../trade-engine/EngineEvents.js";
@@ -1327,44 +1328,32 @@ export async function handleClientMessage(clientWs, msg) {
         startSilverFallbackIfNeeded(subscribeSymbols);
       }
 
-      // fetch day high/low (best-effort)
-      let hl = null;
-      for (const subSymbol of subscribeSymbols) {
-        try {
-          const candidate = await HighLowService.getDayHighLow(feedMarket, subSymbol);
-          if (candidate?.data) {
-            hl = candidate;
-            break;
-          }
-        } catch (err) {
-          DBG("HighLowService failed", subSymbol, err && err.message ? err.message : err);
-        }
+      // Last price seed: HighLow → kline → trade-tick (app code + provider).
+      // Provider aliases like USTEC/DE30/BTCUSD often fail on AllTick REST.
+      let seed = null;
+      try {
+        seed = await resolveSeedQuote(symbol);
+      } catch (err) {
+        DBG("resolveSeedQuote failed", symbol, err && err.message ? err.message : err);
       }
 
-      if (!hl?.data && feedMarket === "crypto" && subscribeSymbols.some(isSilverSymbol)) {
+      if (!seed && feedMarket === "crypto" && subscribeSymbols.some(isSilverSymbol)) {
         try {
           const silver = silverFallbackLast || (await fetchSilverFallbackQuote());
-          hl = {
-            data: {
-              open: silver.open,
-              high: silver.high,
-              low: silver.low,
-              close: silver.close,
-            },
-          };
+          if (silver?.close > 0) {
+            seed = {
+              bid: silver.close,
+              ask: silver.close,
+              dayOpen: silver.open ?? null,
+              dayHigh: silver.high ?? null,
+              dayLow: silver.low ?? null,
+              dayClose: silver.close,
+            };
+          }
         } catch (err) {
           DBG("Silver fallback OHLC failed", err && err.message ? err.message : err);
         }
       }
-
-      const dayClose = hl?.data?.close ?? null;
-      const dayOpen = hl?.data?.open ?? null;
-      const seed =
-        Number.isFinite(Number(dayClose)) && Number(dayClose) > 0
-          ? Number(dayClose)
-          : Number.isFinite(Number(dayOpen)) && Number(dayOpen) > 0
-            ? Number(dayOpen)
-            : null;
 
       try {
         clientWs.send(
@@ -1374,13 +1363,12 @@ export async function handleClientMessage(clientWs, msg) {
             providerSymbol,
             subscribeSymbols,
             accountId: clientWs.accountId || null,
-            dayOpen,
-            dayHigh: hl?.data?.high ?? null,
-            dayLow: hl?.data?.low ?? null,
-            dayClose,
-            // Closed/weekend markets: last close as bid/ask so UI != 0.00
-            bid: seed,
-            ask: seed,
+            dayOpen: seed?.dayOpen ?? null,
+            dayHigh: seed?.dayHigh ?? null,
+            dayLow: seed?.dayLow ?? null,
+            dayClose: seed?.dayClose ?? null,
+            bid: seed?.bid ?? null,
+            ask: seed?.ask ?? null,
           }),
         );
       } catch (err) {
