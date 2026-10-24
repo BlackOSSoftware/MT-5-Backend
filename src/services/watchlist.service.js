@@ -259,17 +259,13 @@ export const watchlistService = {
       return { error: { status: 400, message: "AccountId is required" } };
     }
 
-    const total = await WatchlistItem.countDocuments({
-      userId,
-      accountId,
-      isAdded: true,
-    });
-
-    if (total > 0) return { data: null, message: "Account watchlist already exists" };
-
     const defaultList = await this.getDefaultList();
-    if (defaultList.length === 0) return { data: null, message: "Default watchlist is empty" };
+    if (defaultList.length === 0) {
+      return { data: null, message: "Default watchlist is empty" };
+    }
 
+    // Merge missing defaults only ($setOnInsert).
+    // Already-added rows stay; user-removed (isAdded:false) are NOT forced back.
     const ops = defaultList.map((item) => ({
       updateOne: {
         filter: { userId, accountId, code: item.code },
@@ -286,11 +282,19 @@ export const watchlistService = {
       },
     }));
 
-    await WatchlistItem.bulkWrite(ops, { ordered: false });
+    const result = await WatchlistItem.bulkWrite(ops, { ordered: false });
+    const inserted =
+      (result.upsertedCount || 0) + (result.insertedCount || 0);
 
-    await delRedis(REDIS_ACCOUNT_KEY(accountId));
+    if (inserted > 0) {
+      await delRedis(REDIS_ACCOUNT_KEY(accountId));
+      return {
+        data: null,
+        message: `Default watchlist topped up (${inserted} added)`,
+      };
+    }
 
-    return { data: null, message: "Default watchlist seeded for account" };
+    return { data: null, message: "Account watchlist already has defaults" };
   },
 
   // -------------------------

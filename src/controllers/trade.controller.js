@@ -1,5 +1,7 @@
 import { tradeEngine } from "../trade-engine/bootstrap.js";
+import EngineSync from "../trade-engine/EngineSync.js";
 import Account from "../models/Account.model.js";
+import Trade from "../models/Trade.model.js";
 import { nextOrderTicket } from "../services/orderTicket.service.js";
 import {
   getPositionsService,
@@ -11,6 +13,36 @@ import {
   getOrdersService,
 } from "../services/history.service.js";
 import { getUserPortfolioSummaryService } from "../services/tradePortfolio.service.js";
+
+/**
+ * List DB se aati hai, close/modify engine RAM se.
+ * Laptop pe open + doosre server pe close / restart ke baad gap ho sakta hai —
+ * missing OPEN trade ko DB se engine me load karo.
+ */
+async function ensureOpenPositionInEngine(accountId, positionId) {
+  const accId = String(accountId);
+  const posId = String(positionId);
+  let account = tradeEngine.accounts.get(accId);
+  if (!account) {
+    await EngineSync.syncAccount(accId);
+    account = tradeEngine.accounts.get(accId);
+  }
+  if (!account) throw new Error("Account not found");
+  if (account.positions?.has(posId)) return;
+
+  const trade = await Trade.findOne({
+    accountId: accId,
+    positionId: posId,
+    status: "OPEN",
+  }).lean();
+
+  if (!trade) throw new Error("Position not found");
+
+  tradeEngine.loadOpenPosition(trade);
+  if (!account.positions?.has(posId)) {
+    throw new Error("Position not found");
+  }
+}
 
 /* =========================
    COMMON: ACCOUNT OWNERSHIP
@@ -114,6 +146,7 @@ export async function closePosition(req, res) {
     }
 
     await verifyAccountOwnership(userId, accountId);
+    await ensureOpenPositionInEngine(accountId, positionId);
 
     const result = tradeEngine.squareOffPosition({
       accountId,
@@ -204,6 +237,7 @@ export async function modifyPositionController(req, res) {
     }
 
     await verifyAccountOwnership(userId, accountId);
+    await ensureOpenPositionInEngine(accountId, positionId);
 
     // number = set, null = clear, field na bheja = unchanged
     const level = (v) =>

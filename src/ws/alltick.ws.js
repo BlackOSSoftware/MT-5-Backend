@@ -288,13 +288,37 @@ function applyTickAndPrecision(value, tick, prec, isBid) {
   return v;
 }
 
-// find symbol in engine with loose matching (case / key normalization)
+/** BTCUSD ↔ BTCUSDT (and GOLD/XAU etc.) for engine lookups. */
+function instrumentAliases(symbol) {
+  const s = normalizeSymbol(symbol);
+  if (!s) return [];
+  const out = [s];
+  if (s.endsWith("USDT") && s.length > 4) out.push(s.slice(0, -1));
+  else if (s.endsWith("USD") && !s.endsWith("USDT") && s.length > 3) {
+    out.push(`${s}T`);
+  }
+  if (s === "GOLD") out.push("XAUUSD");
+  if (s === "XAUUSD") out.push("GOLD");
+  if (s === "SILVER") out.push("XAGUSD");
+  if (s === "XAGUSD") out.push("SILVER");
+  return [...new Set(out)];
+}
+
+function symbolsMatch(a, b) {
+  const set = new Set(instrumentAliases(a));
+  return instrumentAliases(b).some((x) => set.has(x));
+}
+
+// find symbol in engine with loose matching (case / aliases)
 function findSymbolInEngine(symbol) {
   try {
     if (!tradeEngine || !tradeEngine.symbols) return null;
-    if (tradeEngine.symbols.has(symbol)) return tradeEngine.symbols.get(symbol);
+    for (const a of instrumentAliases(symbol)) {
+      if (tradeEngine.symbols.has(a)) return tradeEngine.symbols.get(a);
+    }
+    const want = normalizeSymbol(symbol);
     for (const [k, v] of tradeEngine.symbols.entries()) {
-      if (normalizeSymbol(k) === symbol) return v;
+      if (normalizeSymbol(k) === want || symbolsMatch(k, want)) return v;
     }
   } catch (err) {
     DBG("findSymbolInEngine error", err && err.message ? err.message : err);
@@ -681,6 +705,30 @@ export function registerClient(client) {
   return id;
 }
 
+/** Quotes UI: market open/closed → gray bid/ask. Broadcast to market-route clients. */
+export function broadcastMarketStatus(status) {
+  if (!status?.segment) return;
+  const payload = JSON.stringify({
+    type: "market_status",
+    data: {
+      segment: String(status.segment).toLowerCase(),
+      isMarketOpen: status.isMarketOpen === true,
+      reason: status.reason || null,
+      openTime: status.openTime || null,
+      closeTime: status.closeTime || null,
+      timezone: status.timezone || null,
+      lastCheckedAt: status.lastCheckedAt || new Date().toISOString(),
+    },
+  });
+  for (const ws of wsClients.values()) {
+    try {
+      if (ws.readyState === 1 && ws.routes?.has("market")) {
+        ws.send(payload);
+      }
+    } catch (_) {}
+  }
+}
+
 // remove client and cleanup maps
 export function removeClient(id) {
   const ws = wsClients.get(id);
@@ -1012,12 +1060,23 @@ async function resolveEngineSymbol(raw) {
     ? normalized.replace(/^FX/, "")
     : normalized;
 
-  const candidates = [stripped];
+  const candidates = instrumentAliases(stripped);
   if (stripped === "GOLD") candidates.push("XAUUSD");
   if (stripped === "SILVER") candidates.push("XAGUSD");
 
   for (const candidate of candidates) {
-    if (findSymbolInEngine(candidate)) return candidate;
+    // Prefer the key that actually exists in the engine map.
+    for (const a of instrumentAliases(candidate)) {
+      if (tradeEngine?.symbols?.has(a)) return a;
+    }
+    if (findSymbolInEngine(candidate)) {
+      // Return the engine's stored code when possible.
+      const hit = findSymbolInEngine(candidate);
+      for (const [k, v] of tradeEngine.symbols.entries()) {
+        if (v === hit) return normalizeSymbol(k);
+      }
+      return candidate;
+    }
   }
 
   try {
@@ -1353,40 +1412,51 @@ export async function handleClientMessage(clientWs, msg) {
           DBG("sending positions snapshot", account.positions.size, "to", clientWs.clientId);
           for (const pos of account.positions.values()) {
             try {
+              // Always prefer live engine bid/ask — never freeze on openPrice
+              // just because spread is off (that made Trade screen look stuck).
               let currentPriceToSend = pos.openPrice;
+              let sym = null;
               try {
-                const sym = findSymbolInEngine(pos.symbol);
-                if (clientWs.engineAccount && clientWs.engineAccount.spread_enabled !== false && sym) {
-                  const latestBid = Number(sym.bid || sym.rawBid || 0) || pos.openPrice;
-                  const latestAsk = Number(sym.ask || sym.rawAsk || 0) || pos.openPrice;
-                  const spread = typeof sym.spread === "number" ? sym.spread : 0;
-                  const spreadMode =
-                    typeof sym.spread_mode === "string"
-                      ? sym.spread_mode.trim().toUpperCase()
-                      : "ADD_ON";
-                  const tick = typeof sym.tickSize === "number" ? sym.tickSize : 0;
-                  const prec = typeof sym.pricePrecision === "number" ? sym.pricePrecision : undefined;
-
+                sym = findSymbolInEngine(pos.symbol);
+                const latestBid = Number(sym?.bid || sym?.rawBid || 0);
+                const latestAsk = Number(sym?.ask || sym?.rawAsk || 0);
+                if (sym && latestBid > 0 && latestAsk > 0) {
                   let pbid = latestBid;
                   let pask = latestAsk;
+                  const useSpread =
+                    clientWs.engineAccount &&
+                    clientWs.engineAccount.spread_enabled !== false;
+                  if (useSpread) {
+                    const spread = typeof sym.spread === "number" ? sym.spread : 0;
+                    const spreadMode =
+                      typeof sym.spread_mode === "string"
+                        ? sym.spread_mode.trim().toUpperCase()
+                        : "ADD_ON";
+                    const tick = typeof sym.tickSize === "number" ? sym.tickSize : 0;
+                    const prec =
+                      typeof sym.pricePrecision === "number"
+                        ? sym.pricePrecision
+                        : undefined;
 
-                  if (spread > 0) {
-                    const half = spread / 2;
-                    if (spreadMode === "FIXED" && Number.isFinite(pbid) && Number.isFinite(pask)) {
-                      const mid = (pbid + pask) / 2;
-                      pbid = mid - half;
-                      pask = mid + half;
-                    } else {
-                      pbid = pbid - half;
-                      pask = pask + half;
+                    if (spread > 0) {
+                      const half = spread / 2;
+                      if (
+                        spreadMode === "FIXED" &&
+                        Number.isFinite(pbid) &&
+                        Number.isFinite(pask)
+                      ) {
+                        const mid = (pbid + pask) / 2;
+                        pbid = mid - half;
+                        pask = mid + half;
+                      } else {
+                        pbid = pbid - half;
+                        pask = pask + half;
+                      }
                     }
+                    pbid = applyTickAndPrecision(pbid, tick, prec, true);
+                    pask = applyTickAndPrecision(pask, tick, prec, false);
                   }
-                  pbid = applyTickAndPrecision(pbid, tick, prec, true);
-                  pask = applyTickAndPrecision(pask, tick, prec, false);
-
                   currentPriceToSend = pos.side === "BUY" ? pbid : pask;
-                } else {
-                  currentPriceToSend = pos.openPrice;
                 }
               } catch {
                 currentPriceToSend = pos.openPrice;

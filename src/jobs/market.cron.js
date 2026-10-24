@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { MarketSchedule } from '../models/MarketSchedule.model.js';
 import { marketService } from '../services/market.service.js';
 import { tradeEngine } from '../trade-engine/bootstrap.js';
+import { broadcastMarketStatus } from '../ws/alltick.ws.js';
 
 export const startMarketCron = () => {
   // Track changes to avoid noisy logs every minute.
@@ -53,6 +54,8 @@ export const startMarketCron = () => {
               lastCheckedAt: res.data.lastCheckedAt,
             });
             lastBySegment.set(res.data.segment, next);
+            // Quotes UI: closed symbols gray bid/ask
+            broadcastMarketStatus(res.data);
           }
         }
       }

@@ -10,6 +10,30 @@ import { ledgerQueue } from "./LedgerQueue.js";
 
 const DEBUG_LIVE = true;
 
+/** BTCUSD ↔ BTCUSDT, ETHUSD ↔ ETHUSDT, GOLD ↔ XAUUSD, … */
+export function instrumentAliases(symbol) {
+  const s = String(symbol || "")
+    .trim()
+    .replace(/[^A-Za-z0-9]/g, "")
+    .toUpperCase();
+  if (!s) return [];
+  const out = [s];
+  if (s.endsWith("USDT") && s.length > 4) out.push(s.slice(0, -1));
+  else if (s.endsWith("USD") && !s.endsWith("USDT") && s.length > 3) {
+    out.push(`${s}T`);
+  }
+  if (s === "GOLD") out.push("XAUUSD");
+  if (s === "XAUUSD") out.push("GOLD");
+  if (s === "SILVER") out.push("XAGUSD");
+  if (s === "XAGUSD") out.push("SILVER");
+  return [...new Set(out)];
+}
+
+export function symbolsMatch(a, b) {
+  const set = new Set(instrumentAliases(a));
+  return instrumentAliases(b).some((x) => set.has(x));
+}
+
 export class Engine {
   constructor() {
     this.accounts = new Map();
@@ -251,6 +275,31 @@ export class Engine {
     if (!seg) return null;
 
     return this.getMarketStatus(seg);
+  }
+
+  /**
+   * Trade/close se pehle: pehle market hours, phir live price.
+   * Weekend pe forex ticks nahi aate (bid=0) — pehle "Price not ready"
+   * dikhta tha; ab closed market pe clear "Market is closed" aata hai.
+   */
+  assertSymbolTradable(symbol, { requirePrice = true } = {}) {
+    const sym = this.symbols.get(symbol);
+    if (!sym) throw new Error("Invalid symbol");
+
+    const status = this.getMarketStatusForSymbol(symbol);
+    if (!status) {
+      throw new Error("Market status unavailable, please try again");
+    }
+    if (status.isMarketOpen !== true) {
+      const reason = status.reason ? ` (${status.reason})` : "";
+      throw new Error(`Market is closed${reason}`);
+    }
+
+    if (requirePrice && (sym.bid <= 0 || sym.ask <= 0)) {
+      throw new Error("Price not ready");
+    }
+
+    return { sym, status };
   }
 
   /* =========================
@@ -509,20 +558,10 @@ export class Engine {
     overrideOpenPrice = null,
   }) {
     const account = this.accounts.get(accountId);
-    const sym = this.symbols.get(symbol);
-
     if (!account) throw new Error("Invalid trading account");
-    if (!sym) throw new Error("Invalid symbol");
-    if (sym.bid <= 0 || sym.ask <= 0) throw new Error("Price not ready");
 
-    // Market hours guard (fast: RAM status snapshot). This protects both user and admin trades.
-    const status = this.getMarketStatusForSymbol(symbol);
-    if (!status) {
-      throw new Error("Market status unavailable, please try again");
-    }
-    if (status.isMarketOpen !== true) {
-      throw new Error("Market is closed");
-    }
+    // Market closed pehle — warna weekend pe forex bid=0 se "Price not ready" dikhta tha.
+    const { sym } = this.assertSymbolTradable(symbol, { requirePrice: true });
 
     // Run validation for MARKET order (SL/TP vs current market)
     validateOrder({
@@ -983,20 +1022,45 @@ export class Engine {
   ========================== */
 
   async onTick(symbol, bid, ask) {
-    const sym = this.symbols.get(symbol);
+    // Resolve engine symbol even when Alltick code is BTCUSDT and
+    // positions use BTCUSD (or the reverse).
+    const aliases = instrumentAliases(symbol);
+    let sym =
+      this.symbols.get(symbol) ||
+      aliases.map((a) => this.symbols.get(a)).find(Boolean) ||
+      null;
+    if (!sym) {
+      for (const [k, v] of this.symbols.entries()) {
+        if (symbolsMatch(k, symbol)) {
+          sym = v;
+          break;
+        }
+      }
+    }
     if (!sym) return;
 
-    // keep both raw and public fields
+    const nowTs = Date.now();
+    // keep both raw and public fields on every alias key present in map
+    for (const key of new Set([symbol, ...aliases, ...(sym.code ? [sym.code] : [])])) {
+      const row = this.symbols.get(key);
+      if (!row) continue;
+      row.rawBid = bid;
+      row.rawAsk = ask;
+      row.bid = bid;
+      row.ask = ask;
+      row.lastTickAt = nowTs;
+    }
     sym.rawBid = bid;
     sym.rawAsk = ask;
-
     sym.bid = bid;
     sym.ask = ask;
-    sym.lastTickAt = Date.now();
+    sym.lastTickAt = nowTs;
 
     // If market is closed for this symbol's segment, we keep pending orders pending (no execution),
     // but still emit live price updates so the UI remains responsive.
-    const marketStatus = this.getMarketStatusForSymbol(symbol);
+    const statusKey =
+      aliases.find((a) => this.symbols.has(a)) || symbol;
+    const marketStatus = this.getMarketStatusForSymbol(statusKey);
     const isMarketOpen = marketStatus?.isMarketOpen === true;
 
     for (const account of this.accounts.values()) {
@@ -1031,34 +1095,32 @@ export class Engine {
             continue;
           }
 
+          if (!symbolsMatch(order.symbol, symbol)) continue;
+
           /* ===== LIVE UPDATE ===== */
 
-          if (order.symbol === symbol) {
-            // compute per-account formatted price to show currentPrice
-            let formattedPrice = { bid, ask };
-            try {
-              formattedPrice = this.formatPrice(account, sym, bid, ask);
-            } catch (err) {
-              formattedPrice = { bid, ask };
-            }
-
-            try {
-              engineEvents.emit("LIVE_PENDING", {
-                ...order,
-                accountId: account.accountId,
-                currentPrice:
-                  order.side === "BUY"
-                    ? formattedPrice.ask
-                    : formattedPrice.bid,
-                ageMs: Date.now() - (order.createdAt || Date.now()),
-                status: "PENDING",
-              });
-            } catch (err) {
-              console.error("[ENGINE] emit LIVE_PENDING failed", err);
-            }
+          // compute per-account formatted price to show currentPrice
+          let formattedPrice = { bid, ask };
+          try {
+            formattedPrice = this.formatPrice(account, sym, bid, ask);
+          } catch (err) {
+            formattedPrice = { bid, ask };
           }
 
-          if (order.symbol !== symbol) continue;
+          try {
+            engineEvents.emit("LIVE_PENDING", {
+              ...order,
+              accountId: account.accountId,
+              currentPrice:
+                order.side === "BUY"
+                  ? formattedPrice.ask
+                  : formattedPrice.bid,
+              ageMs: Date.now() - (order.createdAt || Date.now()),
+              status: "PENDING",
+            });
+          } catch (err) {
+            console.error("[ENGINE] emit LIVE_PENDING failed", err);
+          }
 
           // Do not execute pending orders while market is closed.
           // Important: we DO NOT remove the order in this case (no false "failed" execution).
@@ -1221,17 +1283,20 @@ export class Engine {
       ====================== */
 
       for (const pos of account.positions.values()) {
-        if (pos.symbol !== symbol) continue;
+        if (!symbolsMatch(pos.symbol, symbol)) continue;
+
+        // Prefer the position's own engine row when present (contractSize etc.).
+        const posSym = this.symbols.get(pos.symbol) || sym;
 
         // compute per-account formatted price for PnL and checks
         let formatted = { bid, ask };
         try {
-          formatted = this.formatPrice(account, sym, bid, ask);
+          formatted = this.formatPrice(account, posSym, bid, ask);
         } catch (err) {
           formatted = { bid, ask };
         }
 
-        pos.updatePnL(formatted.bid, formatted.ask, sym?.contractSize);
+        pos.updatePnL(formatted.bid, formatted.ask, posSym?.contractSize);
 
         const currentPrice = pos.side === "BUY" ? formatted.bid : formatted.ask;
 
@@ -1247,7 +1312,7 @@ export class Engine {
             openPrice: pos.openPrice,
             currentPrice,
             floatingPnL: Number(pos.floatingPnL.toFixed(2)),
-            contractSize: pos.contractSize ?? sym?.contractSize ?? null,
+            contractSize: pos.contractSize ?? posSym?.contractSize ?? null,
             stopLoss: pos.stopLoss,
             takeProfit: pos.takeProfit,
             commission: pos.commission || 0,
@@ -1266,7 +1331,7 @@ export class Engine {
             ((pos.side === "BUY" && currentPrice <= pos.stopLoss) ||
               (pos.side === "SELL" && currentPrice >= pos.stopLoss))
           ) {
-            this.closePositionInternal(account, pos, "STOP_LOSS", sym);
+            this.closePositionInternal(account, pos, "STOP_LOSS", posSym);
             continue;
           }
 
@@ -1277,7 +1342,7 @@ export class Engine {
             ((pos.side === "BUY" && currentPrice >= pos.takeProfit) ||
               (pos.side === "SELL" && currentPrice <= pos.takeProfit))
           ) {
-            this.closePositionInternal(account, pos, "TAKE_PROFIT", sym);
+            this.closePositionInternal(account, pos, "TAKE_PROFIT", posSym);
           }
         }
       }
@@ -1476,17 +1541,9 @@ export class Engine {
 
     if (!pos) throw new Error("Position not found");
 
-    const sym = this.symbols.get(pos.symbol);
-
-    if (!sym) throw new Error("Symbol not loaded");
-
-    const status = this.getMarketStatusForSymbol(pos.symbol);
-    if (!status) {
-      throw new Error("Market status unavailable, please try again");
-    }
-    if (status.isMarketOpen !== true) {
-      throw new Error("Market is closed");
-    }
+    const { sym } = this.assertSymbolTradable(pos.symbol, {
+      requirePrice: true,
+    });
 
     this.closePositionInternal(account, pos, reason, sym, closeTicket);
 

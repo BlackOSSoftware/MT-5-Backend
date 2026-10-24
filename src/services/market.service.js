@@ -8,7 +8,12 @@ import { REDIS_MARKET_SCHEDULE_KEY, REDIS_MARKET_STATUS_KEY } from '../config/ma
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-const normalizeSegment = (segment) => String(segment || '').trim().toLowerCase();
+const normalizeSegment = (segment) => {
+  const seg = String(segment || '').trim().toLowerCase();
+  // Admin UI "indexes" + instrument "indices" / "index" → ek hi schedule doc
+  if (seg === 'indexes' || seg === 'index') return 'indices';
+  return seg;
+};
 const normalizeDay = (dayName) => String(dayName || '').trim().toUpperCase();
 
 // We keep market status in Redis with a short TTL so it auto-refreshes with time.
