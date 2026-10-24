@@ -558,9 +558,17 @@ class AlltickWS extends EventEmitter {
     this.stopHeartbeat();
   }
 
-  subscribe(codeRaw, levelRaw = 5) {
+  /**
+   * @param codeRaw app / any symbol (normalized uppercase for map key)
+   * @param levelRaw depth
+   * @param providerCodeRaw AllTick code — case-sensitive (e.g. "Silver")
+   */
+  subscribe(codeRaw, levelRaw = 5, providerCodeRaw = null) {
     const symbol = normalizeSymbol(codeRaw);
-    const providerCode = normalizeProviderCode(codeRaw);
+    // Prefer explicit provider code; do NOT uppercase (AllTick: "Silver" ≠ "SILVER")
+    const providerCode = normalizeProviderCode(
+      providerCodeRaw || codeRaw,
+    );
     const depth = Number(levelRaw) || 5;
 
     if (!symbol || !providerCode) return;
@@ -1319,9 +1327,13 @@ export async function handleClientMessage(clientWs, msg) {
         subs.add(makeKey(feedMarket, subSymbol));
       }
 
-      for (const subSymbol of subscribeSymbols) {
-        if (feedMarket === "crypto") wsCrypto.subscribe(subSymbol);
-        if (feedMarket === "stock") wsStock.subscribe(subSymbol);
+      // Upstream: only resolved provider code (case-sensitive). Looping
+      // SILVER after Silver overwrites and breaks AllTick (ret 600).
+      if (feedMarket === "crypto") {
+        wsCrypto.subscribe(symbol, 5, providerSymbol);
+      }
+      if (feedMarket === "stock") {
+        wsStock.subscribe(symbol, 5, providerSymbol);
       }
 
       if (feedMarket === "crypto") {

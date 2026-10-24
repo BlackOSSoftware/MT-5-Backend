@@ -131,9 +131,20 @@ export async function resolveSeedQuote(symbolRaw) {
   const providerCode =
     (await resolveInstrumentProviderCode(code).catch(() => null)) || code;
 
-  // Try app code first (AllTick often wants NAS100 not USTEC, BTCUSDT not BTCUSD),
-  // then provider code.
-  const codes = [...new Set([code, providerCode, symbol].filter(Boolean))];
+  // App code + provider (case-sensitive: AllTick wants "Silver" not SILVER/XAGUSD).
+  const codes = [
+    ...new Set(
+      [
+        providerCode,
+        code,
+        symbol,
+        // known AllTick metal alias
+        code === "SILVER" || symbol === "SILVER" || providerCode === "XAGUSD"
+          ? "Silver"
+          : null,
+      ].filter(Boolean),
+    ),
+  ];
 
   let hl = null;
   for (const c of codes) {
