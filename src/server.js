@@ -25,16 +25,32 @@ console.log("ENV CHECK:", {
   ACCOUNT_JWT_SECRET: Boolean(process.env.ACCOUNT_JWT_SECRET),
 });
 
-async function start() {
-  // =========================
-  // 1️⃣ CONNECT DATABASE
-  // =========================
-  await connectDB();
-  console.log("MongoDB connected");
+async function warmMarketStatus(symbols) {
+  try {
+    const schedules = await MarketSchedule.find({}).select("segment").lean();
+    const segmentSet = new Set();
 
-  // =========================
-  // 2️⃣ LOAD DATA FROM DB
-  // =========================
+    for (const s of schedules) {
+      if (s?.segment) segmentSet.add(String(s.segment));
+    }
+    for (const sym of symbols) {
+      if (sym?.segment) segmentSet.add(String(sym.segment));
+    }
+
+    for (const seg of segmentSet) {
+      const res = await marketService.refreshMarketStatus(seg);
+      if (res?.data) {
+        tradeEngine.setMarketStatus(res.data.segment, res.data);
+      }
+    }
+
+    console.log("[MARKET] status warmed:", Array.from(segmentSet));
+  } catch (err) {
+    console.error("[MARKET] status warmup failed:", err?.message || err);
+  }
+}
+
+async function bootstrapTradeEngine() {
   try {
     const bonusSetting = await BonusSetting.findOne({ key: "GLOBAL" }).lean();
     const bonusEnabled =
@@ -55,6 +71,7 @@ async function start() {
     console.warn("[BONUS] settings preload failed:", err?.message || err);
   }
 
+  console.log("[BOOTSTRAP] loading accounts + symbols...");
   const accounts = await Account.find(
     { status: "active" },
     {
@@ -83,66 +100,35 @@ async function start() {
     },
   ).lean();
 
+  console.log(
+    `[BOOTSTRAP] accounts=${accounts.length} symbols=${symbols.length} — starting engine (ticket backfill may take a while)`,
+  );
 
-
-  // =========================
-  // 3️⃣ BOOTSTRAP TRADE ENGINE (RAM)
-  // =========================
   await bootstrapEngine({
-    accounts, // 👈 PURE Mongo docs (with _id)
+    accounts,
     symbols,
   });
 
   console.log("[TRADE ENGINE] RAM READY");
 
-  // Redis pub/sub fanout so DB-driven changes sync across all Node workers.
   startEngineSyncBus();
+  await warmMarketStatus(symbols);
+}
 
-  // Warm up market status in RAM so market-hours validation works immediately.
-  // (The cron will keep refreshing it every minute.)
-  try {
-    const schedules = await MarketSchedule.find({}).select("segment").lean();
-    const segmentSet = new Set();
+async function start() {
+  await connectDB();
+  console.log("MongoDB connected");
 
-    for (const s of schedules) {
-      if (s?.segment) segmentSet.add(String(s.segment));
-    }
-    for (const sym of symbols) {
-      if (sym?.segment) segmentSet.add(String(sym.segment));
-    }
-
-    for (const seg of segmentSet) {
-      const res = await marketService.refreshMarketStatus(seg);
-      if (res?.data) {
-        tradeEngine.setMarketStatus(res.data.segment, res.data);
-      }
-    }
-
-    console.log("[MARKET] status warmed:", Array.from(segmentSet));
-  } catch (err) {
-    console.error("[MARKET] status warmup failed:", err?.message || err);
-  }
-
-  // =========================
-  // 4️⃣ CREATE SERVER
-  // =========================
+  // Start HTTP ASAP so auth/login works even while engine backfill runs.
   const server = http.createServer(app);
-
   server.keepAliveTimeout = 65000;
   server.headersTimeout = 66000;
-
-  // =========================
-  // 5️⃣ ATTACH MARKET WS
-  // =========================
   attachMarketWS(server);
 
-  // =========================
-  // 6️⃣ START SERVER
-  // =========================
   server.on("error", (err) => {
     if (err && err.code === "EADDRINUSE") {
       console.error(
-        `Port ${PORT} already in use. Stop the other backend (or kill the process on :${PORT}) and restart once.`
+        `Port ${PORT} already in use. Stop the other backend (or kill the process on :${PORT}) and restart once.`,
       );
       process.exit(1);
     }
@@ -150,11 +136,19 @@ async function start() {
     process.exit(1);
   });
 
-  server.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
-    console.log(`WebSocket Market WS at ws://localhost:${PORT}/ws/market`);
-    startMarketCron();
-    startSwapCron();
+  await new Promise((resolve) => {
+    server.listen(PORT, () => {
+      console.log(`Server running at http://localhost:${PORT}`);
+      console.log(`WebSocket Market WS at ws://localhost:${PORT}/ws/market`);
+      startMarketCron();
+      startSwapCron();
+      resolve();
+    });
+  });
+
+  // Heavy trade-engine bootstrap after API is already accepting requests.
+  bootstrapTradeEngine().catch((err) => {
+    console.error("[BOOTSTRAP] trade engine failed:", err?.message || err);
   });
 }
 

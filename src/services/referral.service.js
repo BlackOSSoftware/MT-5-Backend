@@ -3,6 +3,7 @@ import Referral from "../models/Referral.model.js";
 import ReferralReward from "../models/ReferralReward.model.js";
 import Account from "../models/Account.model.js";
 import AccountPlan from "../models/AccountPlan.model.js";
+import Deposit from "../models/Deposit.model.js";
 import Transaction from "../models/Transaction.model.js";
 import { generateReferralCode } from "../utils/referralCode.util.js";
 import EngineSync from "../trade-engine/EngineSync.js";
@@ -191,16 +192,73 @@ export async function listMyDirectReferralsService({
     Referral.countDocuments(filter),
   ]);
 
+  const referredIds = docs
+    .map((doc) => {
+      const id = doc.user_id?._id || doc.user_id;
+      return id ? new mongoose.Types.ObjectId(String(id)) : null;
+    })
+    .filter(Boolean);
+
+  // Total approved deposits only (excludes bonus / referral credits).
+  const depositAgg =
+    referredIds.length === 0
+      ? []
+      : await Deposit.aggregate([
+          {
+            $match: {
+              user: { $in: referredIds },
+              status: "APPROVED",
+            },
+          },
+          {
+            $group: {
+              _id: "$user",
+              totalDeposit: { $sum: "$amount" },
+              depositCount: { $sum: 1 },
+            },
+          },
+        ]);
+
+  const accountAgg =
+    referredIds.length === 0
+      ? []
+      : await Account.aggregate([
+          {
+            $match: {
+              user_id: { $in: referredIds },
+            },
+          },
+          {
+            $group: {
+              _id: "$user_id",
+              accountCount: { $sum: 1 },
+            },
+          },
+        ]);
+
+  const depositByUser = new Map(
+    depositAgg.map((row) => [String(row._id), row]),
+  );
+  const accountsByUser = new Map(
+    accountAgg.map((row) => [String(row._id), row]),
+  );
+
   const items = docs.map((doc) => {
     const user = toPublicUserCard(doc.user_id);
+    const uid = user?._id || (doc.user_id ? String(doc.user_id) : null);
+    const dep = uid ? depositByUser.get(String(uid)) : null;
+    const acc = uid ? accountsByUser.get(String(uid)) : null;
     return {
-      userId: user?._id || (doc.user_id ? String(doc.user_id) : null),
+      userId: uid,
       user,
       name: user?.name || "",
       email: user?.email || "",
       referralCode: doc.referral_code || null,
       status: doc.status || null,
       createdAt: doc.createdAt || null,
+      totalDeposit: Number(dep?.totalDeposit) || 0,
+      depositCount: Number(dep?.depositCount) || 0,
+      accountCount: Number(acc?.accountCount) || 0,
     };
   });
 

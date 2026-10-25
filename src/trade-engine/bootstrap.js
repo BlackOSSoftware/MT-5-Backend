@@ -12,20 +12,47 @@ import {
 export const tradeEngine = new Engine();
 
 async function backfillField(Model, field, filter, nextTicket) {
-  const cursor = Model.find({ ...filter, [field]: { $exists: false } })
-    .select("_id")
-    .lean()
-    .cursor();
+  const query = { ...filter, [field]: { $exists: false } };
+  const total = await Model.countDocuments(query);
+  if (!total) return;
+
+  console.log(`[BACKFILL] ${Model.modelName}.${field}: ${total} rows`);
+  const cursor = Model.find(query).select("_id").lean().cursor();
+  const batch = [];
+  let done = 0;
+
   for await (const record of cursor) {
     const ticket = await nextTicket();
-    await Model.updateOne(
-      { _id: record._id, [field]: { $exists: false } },
-      { $set: { [field]: ticket } },
-    );
+    batch.push({
+      updateOne: {
+        filter: { _id: record._id, [field]: { $exists: false } },
+        update: { $set: { [field]: ticket } },
+      },
+    });
+
+    if (batch.length >= 100) {
+      await Model.bulkWrite(batch, { ordered: false });
+      done += batch.length;
+      batch.length = 0;
+      if (done % 500 === 0 || done === total) {
+        console.log(`[BACKFILL] ${Model.modelName}.${field}: ${done}/${total}`);
+      }
+    }
   }
+
+  if (batch.length) {
+    await Model.bulkWrite(batch, { ordered: false });
+    done += batch.length;
+  }
+  console.log(`[BACKFILL] ${Model.modelName}.${field}: done (${done})`);
 }
 
 async function backfillOrderTickets() {
+  if (String(process.env.SKIP_TICKET_BACKFILL || "").toLowerCase() === "true") {
+    console.log("[BACKFILL] skipped (SKIP_TICKET_BACKFILL=true)");
+    return;
+  }
+
   await backfillField(Trade, "ticket", {}, nextOrderTicket);
   await backfillField(PendingOrder, "ticket", {}, nextOrderTicket);
   // Purane band trades: close order + in/out deals ke unique numbers.
