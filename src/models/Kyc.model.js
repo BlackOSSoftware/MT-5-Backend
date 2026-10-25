@@ -10,6 +10,13 @@ const kycSchema = new mongoose.Schema(
       index: true
     },
 
+    brokerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Broker',
+      default: null,
+      index: true,
+    },
+
     // Who created/updated this KYC record
     // USER: submitted by user with documents
     // ADMIN: created/overridden by admin (documents may be empty)

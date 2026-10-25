@@ -3,11 +3,20 @@ import admin from '../config/firebase.js';
 import UserDevice from '../models/UserDevice.model.js';
 import PublicNotification from '../models/PublicNotification.model.js';
 import AccountAuth from '../models/AccountAuth.model.js';
+import { getBrokerUserIds } from '../utils/brokerScope.js';
 
 /**
- * Broadcast to all devices (web + android + ios if present)
+ * Broadcast to all devices (web + android + ios if present).
+ * When brokerId is set, only devices for that broker's users are targeted.
+ * PublicNotification has no brokerId field — stamp skipped.
  */
-export async function broadcastNotification({ title, message, data, expireAt }) {
+export async function broadcastNotification({
+  title,
+  message,
+  data,
+  expireAt,
+  brokerId = null,
+}) {
   if (!title || !message || !expireAt) {
     throw new Error('title, message and expireAt are required');
   }
@@ -16,7 +25,7 @@ export async function broadcastNotification({ title, message, data, expireAt }) 
   if (Number.isNaN(expiryDate.getTime())) throw new Error('Invalid expireAt date');
   if (expiryDate <= new Date()) throw new Error('expireAt must be a future date');
 
-  // 1. Save in DB
+  // 1. Save in DB (no brokerId on schema — skip stamp)
   const notification = await PublicNotification.create({
     title,
     message,
@@ -25,8 +34,14 @@ export async function broadcastNotification({ title, message, data, expireAt }) 
   });
 
   // 2. Get tokens for all platforms (do NOT filter only web)
+  const deviceFilter = { fcm_token: { $exists: true, $ne: '' } };
+  if (brokerId) {
+    const brokerUserIds = await getBrokerUserIds(brokerId);
+    deviceFilter.user_id = { $in: brokerUserIds || [] };
+  }
+
   const devices = await UserDevice.find(
-    { fcm_token: { $exists: true, $ne: '' } },
+    deviceFilter,
     { fcm_token: 1, platform: 1, _id: 0 }
   ).lean();
 

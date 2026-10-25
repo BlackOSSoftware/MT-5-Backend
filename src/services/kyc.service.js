@@ -67,6 +67,7 @@ export async function submitKycService(userId, payload) {
 
   /* ===== CREATE NEW KYC ===== */
   const kyc = await KycModel.create({
+    brokerId: user.brokerId || null,
     user: userId,
     source: 'USER',
     documentType: payload.documentType,
@@ -103,20 +104,26 @@ export async function getAdminKycListService({
   page = 1,
   limit = 20,
   status,
-  documentType
+  documentType,
+  brokerId = null,
 }) {
   page = Math.max(Number(page) || 1, 1);
   limit = Math.min(Number(limit) || 20, 100);
 
-  const filter = {};
+  let filter = {};
   if (status) filter.status = status;
   if (documentType) filter.documentType = documentType;
+
+  if (brokerId) {
+    const userIds = await UserModel.find({ brokerId }).select("_id").lean();
+    filter.user = { $in: userIds.map((u) => u._id) };
+  }
 
   const skip = (page - 1) * limit;
 
   const [list, total] = await Promise.all([
     KycModel.find(filter)
-      .populate("user", "name email phone")
+      .populate("user", "name email phone brokerId")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -142,7 +149,8 @@ export async function getAdminKycListService({
 export async function updateKycStatusService(
   kycId,
   status,
-  rejectionReason = ''
+  rejectionReason = '',
+  brokerId = null,
 ) {
   if (!['VERIFIED', 'REJECTED'].includes(status)) {
     throw new Error('Invalid KYC status');
@@ -151,6 +159,13 @@ export async function updateKycStatusService(
   const kyc = await KycModel.findById(kycId);
   if (!kyc) {
     throw new Error('KYC not found');
+  }
+
+  if (brokerId) {
+    const owner = await UserModel.findById(kyc.user).select("brokerId").lean();
+    if (!owner || String(owner.brokerId || "") !== String(brokerId)) {
+      throw new Error("KYC not found");
+    }
   }
 
   // 🔒 IMPORTANT: KYC can be updated ONLY if PENDING

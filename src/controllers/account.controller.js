@@ -138,7 +138,8 @@ export async function adminListUserAccountsController(req, res) {
     const { userId } = req.params;
     const data = await adminListUserAccounts({
       userId,
-      query: req.query
+      query: req.query,
+      brokerId: req.brokerId || null,
     });
 
     return res.json({
@@ -156,7 +157,10 @@ export async function adminListUserAccountsController(req, res) {
 
 export async function adminSearchAccountsController(req, res) {
   try {
-    const data = await adminSearchAccounts({ query: req.query });
+    const data = await adminSearchAccounts({
+      query: req.query,
+      brokerId: req.brokerId || null,
+    });
 
     return res.json({
       success: true,
@@ -176,7 +180,8 @@ export async function adminUpdateAccountController(req, res) {
     const { accountId } = req.params;
     const data = await adminUpdateAccountService({
       accountId,
-      payload: req.body
+      payload: req.body,
+      brokerId: req.brokerId || null,
     });
 
     return res.json({
@@ -195,7 +200,10 @@ export async function adminUpdateAccountController(req, res) {
 export async function adminDeleteAccountController(req, res) {
   try {
     const { accountId } = req.params;
-    const data = await adminDeleteAccountService({ accountId });
+    const data = await adminDeleteAccountService({
+      accountId,
+      brokerId: req.brokerId || null,
+    });
 
     return res.json({
       success: true,

@@ -35,8 +35,12 @@ export async function searchUsersService(query = {}) {
     ]
   };
 
+  if (query.brokerId) {
+    filter.brokerId = query.brokerId;
+  }
+
   const users = await User.find(filter)
-    .select('_id name email phone userType isMailVerified kycStatus createdAt isOnline lastSeenAt')
+    .select('_id name email phone userType isMailVerified kycStatus brokerId createdAt isOnline lastSeenAt')
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
@@ -66,13 +70,32 @@ export async function getMyProfileService(userId) {
       }
     },
     {
+      $lookup: {
+        from: 'brokers',
+        localField: 'brokerId',
+        foreignField: '_id',
+        as: 'broker'
+      }
+    },
+    {
+      $unwind: {
+        path: '$broker',
+        preserveNullAndEmptyArrays: true
+      }
+    },
+    {
       $project: {
         _id: 1,
         email: 1,
         phone: 1,
         name: 1,
+        userType: 1,
+        platformRole: 1,
+        brokerId: 1,
         isMailVerified: 1,
         kycStatus: 1,
+        brokerDisplayName: '$broker.displayName',
+        brokerCode: '$broker.code',
 
         date_of_birth: '$profile.date_of_birth',
         gender: '$profile.gender',
@@ -311,10 +334,14 @@ export async function adminListUsersService(query = {}) {
     filter.kycStatus = query.kycStatus.trim().toUpperCase();
   }
 
+  if (query.brokerId) {
+    filter.brokerId = query.brokerId;
+  }
+
   const [items, total] = await Promise.all([
     User.find(filter)
       .select(
-        "_id name email phone userType isMailVerified kycStatus createdAt isOnline lastSeenAt"
+        "_id name email phone userType isMailVerified kycStatus brokerId createdAt isOnline lastSeenAt"
       )
       .sort({ createdAt: -1 })
       .skip(skip)

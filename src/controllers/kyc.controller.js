@@ -4,7 +4,6 @@ import {
   updateKycStatusService,
   getAdminKycListService
 } from '../services/kyc.service.js';
-import Kyc from "../models/Kyc.model.js";
 /* USER */
 export async function submitKyc(req, res) {
   try {
@@ -36,32 +35,18 @@ export const getAllKycs = async (req, res) => {
   try {
     const { status, page = 1, limit = 10 } = req.query;
 
-    const query = {};
-    if (status) query.status = status;
-
-    const skip = (page - 1) * limit;
-
-    const [list, total] = await Promise.all([
-      Kyc.find(query)
-        .populate("user", "name email phone")
-        .sort({ createdAt: -1 })
-        .skip(Number(skip))
-        .limit(Number(limit))
-        .lean(),
-
-      Kyc.countDocuments(query),
-    ]);
+    const data = await getAdminKycListService({
+      page,
+      limit,
+      status,
+      brokerId: req.brokerId || null,
+    });
 
     res.json({
       success: true,
       data: {
-        list,
-        pagination: {
-          page: Number(page),
-          limit: Number(limit),
-          total,
-          totalPages: Math.ceil(total / limit),
-        },
+        list: data.list,
+        pagination: data.pagination,
       },
     });
   } catch (err) {
@@ -79,7 +64,8 @@ export async function updateKycStatus(req, res) {
     const kyc = await updateKycStatusService(
       req.params.kycId,
       status,
-      rejectionReason
+      rejectionReason,
+      req.brokerId || null,
     );
 
     res.json({

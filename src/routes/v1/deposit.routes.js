@@ -12,6 +12,7 @@ import {
 } from "../../controllers/deposit.controller.js";
 import { authMiddleware } from '../../middlewares/auth.middleware.js';
 import { adminAuth } from '../../middlewares/adminAuth.middleware.js';
+import { brokerAdminAuth } from '../../middlewares/brokerAuth.middleware.js';
 
 const router = express.Router();
 
@@ -21,10 +22,10 @@ router.get('/my',authMiddleware , getMyDeposits);
 router.get('/:id/status', authMiddleware, getDepositStatus);
 
 /* ADMIN */
-router.post('/admin-deposit', authMiddleware, adminAuth, adminCreateDeposit);
-router.get('/all', authMiddleware,adminAuth, adminGetAllDeposits);
-router.get('/admin/search', authMiddleware, adminAuth, adminSearchDeposits);
-router.patch('/:id/approve', authMiddleware,adminAuth, adminApproveDeposit);
-router.patch('/:id/reject', authMiddleware,adminAuth, adminRejectDeposit);
-router.patch('/:id/edit-amount',authMiddleware,adminAuth,adminEditDepositAmount);
+router.post('/admin-deposit', brokerAdminAuth, adminCreateDeposit);
+router.get('/all', brokerAdminAuth, adminGetAllDeposits);
+router.get('/admin/search', brokerAdminAuth, adminSearchDeposits);
+router.patch('/:id/approve', brokerAdminAuth, adminApproveDeposit);
+router.patch('/:id/reject', brokerAdminAuth, adminRejectDeposit);
+router.patch('/:id/edit-amount', brokerAdminAuth, adminEditDepositAmount);
 export default router;

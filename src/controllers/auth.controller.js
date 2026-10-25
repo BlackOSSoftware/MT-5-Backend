@@ -135,6 +135,9 @@ export async function login(req, res) {
       accessToken,
       refreshToken,
       role,
+      platformRole,
+      brokerId,
+      memberships,
       isMailVerified 
     } = await loginService({
       email,
@@ -150,6 +153,9 @@ export async function login(req, res) {
         accessToken,
         refreshToken,
         role,
+        platformRole: platformRole || null,
+        brokerId: brokerId || null,
+        memberships: memberships || [],
         isMailVerified,
       }
     });

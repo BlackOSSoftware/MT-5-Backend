@@ -21,7 +21,8 @@ export async function createPaymentMethod(req, res) {
 
     const data = await createPaymentMethodService(
       req.user._id,
-      req.body
+      req.body,
+      req.brokerId || null,
     );
 
     return res.status(201).json({
@@ -58,7 +59,11 @@ export async function updatePaymentMethod(req, res) {
       });
     }
 
-    const data = await updatePaymentMethodService(id, req.body);
+    const data = await updatePaymentMethodService(
+      id,
+      req.body,
+      req.brokerId || null,
+    );
 
     return res.json({
       success: true,
@@ -101,7 +106,7 @@ export async function deletePaymentMethod(req, res) {
       });
     }
 
-    await deletePaymentMethodService(id);
+    await deletePaymentMethodService(id, req.brokerId || null);
 
     return res.status(200).json({
       success: true,
@@ -152,7 +157,11 @@ export async function togglePaymentMethod(req, res) {
       });
     }
 
-    const updated = await togglePaymentMethodService(id, is_active);
+    const updated = await togglePaymentMethodService(
+      id,
+      is_active,
+      req.brokerId || null,
+    );
 
     return res.status(200).json({
       success: true,
@@ -192,7 +201,7 @@ export async function togglePaymentMethod(req, res) {
  */
 export async function getAllPaymentMethods(req, res) {
   try {
-    const data = await getAllPaymentMethodsService();
+    const data = await getAllPaymentMethodsService(req.brokerId || null);
 
     return res.json({
       success: true,
@@ -212,7 +221,9 @@ export async function getAllPaymentMethods(req, res) {
  */
 export async function getActivePaymentMethods(req, res) {
   try {
-    const payload = await getActivePaymentMethodsService();
+    const payload = await getActivePaymentMethodsService(
+      req.user?.brokerId || null,
+    );
 
     return res
       .type('json')

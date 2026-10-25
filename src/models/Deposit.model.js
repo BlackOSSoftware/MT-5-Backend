@@ -16,6 +16,13 @@ const depositSchema = new mongoose.Schema(
       index: true
     },
 
+    brokerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Broker',
+      default: null,
+      index: true,
+    },
+
     amount: {
       type: Number,
       required: true,

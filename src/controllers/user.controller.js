@@ -101,7 +101,10 @@ export async function saveFcmToken(req, res) {
 
 export async function adminSearchUsers(req, res) {
   try {
-    const data = await searchUsersService(req.query);
+    const data = await searchUsersService({
+      ...req.query,
+      ...(req.brokerId ? { brokerId: req.brokerId } : {}),
+    });
     const now = Date.now();
 
     return res.json({
@@ -168,7 +171,10 @@ export async function markPresenceOffline(req, res) {
 
 export async function adminListUsers(req, res) {
   try {
-    const data = await adminListUsersService(req.query);
+    const data = await adminListUsersService({
+      ...req.query,
+      ...(req.brokerId ? { brokerId: req.brokerId } : {}),
+    });
     const now = Date.now();
 
     return res.json({

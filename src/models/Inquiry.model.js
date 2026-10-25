@@ -34,7 +34,14 @@ const inquirySchema = new mongoose.Schema(
     ip: {
       type: String,
       required: true
-    }
+    },
+
+    brokerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Broker',
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true

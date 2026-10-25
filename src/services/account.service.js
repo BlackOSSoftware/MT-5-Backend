@@ -409,9 +409,14 @@ export async function setAccountLeverage({ userId, accountId, leverage }) {
 /* =====================================================
    ADMIN: LIST USER ACCOUNTS (FILTER + PAGINATION)
 ===================================================== */
-export async function adminListUserAccounts({ userId, query = {} }) {
+export async function adminListUserAccounts({ userId, query = {}, brokerId = null }) {
   if (!userId || !mongoose.isValidObjectId(userId)) {
     throw new Error("Invalid userId");
+  }
+
+  if (brokerId) {
+    const { assertUserBelongsToBroker } = await import("../utils/brokerScope.js");
+    await assertUserBelongsToBroker(userId, brokerId);
   }
 
   const pageRaw = Number(query.page);
@@ -461,7 +466,7 @@ export async function adminListUserAccounts({ userId, query = {} }) {
 /* =====================================================
    ADMIN: SEARCH ACCOUNTS (USER NAME / EMAIL / PHONE / ACCOUNT NUMBER)
 ===================================================== */
-export async function adminSearchAccounts({ query = {} }) {
+export async function adminSearchAccounts({ query = {}, brokerId = null }) {
   const q = String(query.q || "").trim();
 
   const pageRaw = Number(query.page);
@@ -490,6 +495,15 @@ export async function adminSearchAccounts({ query = {} }) {
       },
     },
     { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
+    ...(brokerId
+      ? [
+          {
+            $match: {
+              "user.brokerId": new mongoose.Types.ObjectId(String(brokerId)),
+            },
+          },
+        ]
+      : []),
     ...(q
       ? [
           {
@@ -575,7 +589,11 @@ export async function adminSearchAccounts({ query = {} }) {
 /* =====================================================
    ADMIN: UPDATE ACCOUNT (FULL DETAILS)
 ===================================================== */
-export async function adminUpdateAccountService({ accountId, payload = {} }) {
+export async function adminUpdateAccountService({
+  accountId,
+  payload = {},
+  brokerId = null,
+}) {
   if (!accountId || !mongoose.isValidObjectId(accountId)) {
     throw new Error("Invalid accountId");
   }
@@ -587,6 +605,11 @@ export async function adminUpdateAccountService({ accountId, payload = {} }) {
   const account = await Account.findById(accountId);
   if (!account) {
     throw new Error("Account not found");
+  }
+
+  if (brokerId) {
+    const { assertUserBelongsToBroker } = await import("../utils/brokerScope.js");
+    await assertUserBelongsToBroker(account.user_id, brokerId);
   }
 
   const plan = await AccountPlan.findById(account.account_plan_id).lean();
@@ -687,7 +710,11 @@ export async function adminUpdateAccountService({ accountId, payload = {} }) {
 /* =====================================================
    ADMIN: DELETE ACCOUNT (CASCADE)
 ===================================================== */
-export async function adminDeleteAccountService({ accountId, userId }) {
+export async function adminDeleteAccountService({
+  accountId,
+  userId,
+  brokerId = null,
+}) {
   if (!accountId || !mongoose.isValidObjectId(accountId)) {
     throw new Error("Invalid accountId");
   }
@@ -706,6 +733,11 @@ export async function adminDeleteAccountService({ accountId, userId }) {
 
   if (!account) {
     throw new Error("Account not found");
+  }
+
+  if (brokerId) {
+    const { assertUserBelongsToBroker } = await import("../utils/brokerScope.js");
+    await assertUserBelongsToBroker(account.user_id, brokerId);
   }
 
   await Promise.all([

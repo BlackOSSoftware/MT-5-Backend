@@ -10,15 +10,32 @@ const ACTIVE_CACHE_KEY = 'payment_methods:active';
 const ALL_CACHE_KEY = 'payment_methods:all';
 const CACHE_TTL = 60; // seconds
 
-const clearPaymentMethodCache = async () => {
-  await redis.del(ACTIVE_CACHE_KEY);
-  await redis.del(ALL_CACHE_KEY);
+const activeCacheKey = (brokerId) =>
+  brokerId ? `${ACTIVE_CACHE_KEY}:${brokerId}` : ACTIVE_CACHE_KEY;
+const allCacheKey = (brokerId) =>
+  brokerId ? `${ALL_CACHE_KEY}:${brokerId}` : ALL_CACHE_KEY;
+
+const clearPaymentMethodCache = async (brokerId = null) => {
+  const keys = [ACTIVE_CACHE_KEY, ALL_CACHE_KEY];
+  if (brokerId) {
+    keys.push(activeCacheKey(brokerId), allCacheKey(brokerId));
+  }
+  await redis.del(...keys);
 };
+
+function assertPaymentBrokerOwned(doc, brokerId) {
+  if (!brokerId) return;
+  if (String(doc?.brokerId || '') !== String(brokerId)) {
+    const err = new Error('Payment method not found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+}
 
 /* =======================
    CREATE PAYMENT METHOD
 ======================= */
-export async function createPaymentMethodService(userId, body) {
+export async function createPaymentMethodService(userId, body, brokerId = null) {
   const { type } = body;
 
   if (!type) {
@@ -33,7 +50,8 @@ export async function createPaymentMethodService(userId, body) {
     image_url: body.image_url || '',
     image_public_id: body.image_public_id || '',
     created_by: userId,
-    is_active: true
+    is_active: true,
+    brokerId: brokerId || body.brokerId || null,
   };
 
   const rawCurrency =
@@ -122,7 +140,7 @@ export async function createPaymentMethodService(userId, body) {
   }
 
   const created = await PaymentMethod.create(payload);
-  await clearPaymentMethodCache();
+  await clearPaymentMethodCache(payload.brokerId);
 
   return created;
 }
@@ -130,7 +148,7 @@ export async function createPaymentMethodService(userId, body) {
 /* =======================
    UPDATE PAYMENT METHOD
 ======================= */
-export async function updatePaymentMethodService(id, body) {
+export async function updatePaymentMethodService(id, body, brokerId = null) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     const err = new Error('Invalid payment method id');
     err.code = 'INVALID_ID';
@@ -143,6 +161,7 @@ export async function updatePaymentMethodService(id, body) {
     err.code = 'NOT_FOUND';
     throw err;
   }
+  assertPaymentBrokerOwned(existing, brokerId);
 
   const newImagePublicId =
     typeof body.image_public_id === 'string' && body.image_public_id.length > 0
@@ -163,20 +182,21 @@ export async function updatePaymentMethodService(id, body) {
     }
   }
 
+  const { brokerId: _ignoreBroker, ...safeBody } = body || {};
   const updated = await PaymentMethod.findByIdAndUpdate(
     id,
-    { $set: body },
+    { $set: safeBody },
     { new: true }
   ).lean();
 
-  await clearPaymentMethodCache();
+  await clearPaymentMethodCache(existing.brokerId || brokerId);
   return updated;
 }
 
 /* =======================
    DELETE PAYMENT METHOD
 ======================= */
-export async function deletePaymentMethodService(id) {
+export async function deletePaymentMethodService(id, brokerId = null) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     const err = new Error('Invalid payment method id');
     err.code = 'INVALID_ID';
@@ -189,6 +209,7 @@ export async function deletePaymentMethodService(id) {
     err.code = 'NOT_FOUND';
     throw err;
   }
+  assertPaymentBrokerOwned(paymentMethod, brokerId);
 
   if (paymentMethod.image_public_id) {
     try {
@@ -201,7 +222,7 @@ export async function deletePaymentMethodService(id) {
   }
 
   await PaymentMethod.deleteOne({ _id: id });
-  await clearPaymentMethodCache();
+  await clearPaymentMethodCache(paymentMethod.brokerId || brokerId);
 
   return true;
 }
@@ -209,7 +230,7 @@ export async function deletePaymentMethodService(id) {
 /* =======================
    TOGGLE ACTIVE / INACTIVE
 ======================= */
-export async function togglePaymentMethodService(id, isActive) {
+export async function togglePaymentMethodService(id, isActive, brokerId = null) {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     const err = new Error('Invalid payment method id');
     err.code = 'INVALID_ID';
@@ -222,6 +243,7 @@ export async function togglePaymentMethodService(id, isActive) {
     err.code = 'NOT_FOUND';
     throw err;
   }
+  assertPaymentBrokerOwned(existing, brokerId);
 
   const activate = Boolean(isActive);
 
@@ -231,16 +253,17 @@ export async function togglePaymentMethodService(id, isActive) {
     { new: true }
   ).lean();
 
-  await clearPaymentMethodCache();
+  await clearPaymentMethodCache(existing.brokerId || brokerId);
   return updated;
 }
 
 /* =======================
    USER → ONLY ACTIVE
 ======================= */
-export async function getActivePaymentMethodsService() {
+export async function getActivePaymentMethodsService(brokerId = null) {
+  const cacheKey = activeCacheKey(brokerId);
   try {
-    const cached = await redis.get(ACTIVE_CACHE_KEY);
+    const cached = await redis.get(cacheKey);
     if (cached) {
       return cached;
     }
@@ -248,14 +271,17 @@ export async function getActivePaymentMethodsService() {
     // redis unavailable, fallback to DB
   }
 
-  const data = await PaymentMethod.find({ is_active: true })
+  const filter = { is_active: true };
+  if (brokerId) filter.brokerId = brokerId;
+
+  const data = await PaymentMethod.find(filter)
     .sort({ createdAt: -1 })
     .lean();
 
   const payload = JSON.stringify(data);
 
   try {
-    await redis.setex(ACTIVE_CACHE_KEY, CACHE_TTL, payload);
+    await redis.setex(cacheKey, CACHE_TTL, payload);
   } catch {
     // ignore redis failure
   }
@@ -265,14 +291,18 @@ export async function getActivePaymentMethodsService() {
 /* =======================
    ADMIN → ALL
 ======================= */
-export async function getAllPaymentMethodsService() {
-  const cached = await redis.get(ALL_CACHE_KEY);
+export async function getAllPaymentMethodsService(brokerId = null) {
+  const cacheKey = allCacheKey(brokerId);
+  const cached = await redis.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
-  const data = await PaymentMethod.find({})
+  const filter = {};
+  if (brokerId) filter.brokerId = brokerId;
+
+  const data = await PaymentMethod.find(filter)
     .sort({ createdAt: -1 })
     .lean();
 
-  await redis.setex(ALL_CACHE_KEY, CACHE_TTL, JSON.stringify(data));
+  await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(data));
   return data;
 }

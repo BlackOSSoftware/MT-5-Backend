@@ -51,7 +51,7 @@ export async function getInquiries(req, res) {
     const page = Math.max(Number(req.query.page) || 1, 1);
     const limit = Math.min(Number(req.query.limit) || 20, 100);
 
-    const result = await getInquiriesService(page, limit);
+    const result = await getInquiriesService(page, limit, req.brokerId || null);
 
     return res.json({
       success: true,

@@ -28,12 +28,13 @@ export async function adminBroadcastNotification(req, res) {
       });
     }
 
-    // 2 Broadcast + DB save
+    // 2 Broadcast + DB save (broker-scoped when broker admin)
     const result = await broadcastNotification({
       title,
       message,
       data,
-      expireAt: expiryDate
+      expireAt: expiryDate,
+      brokerId: req.brokerId || null,
     });
 
     return res.json({

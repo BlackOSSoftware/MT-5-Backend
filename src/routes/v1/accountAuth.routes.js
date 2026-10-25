@@ -21,7 +21,7 @@ async function changeAccountPasswordController(req, res) {
   }
 }
 import { authMiddleware } from "../../middlewares/auth.middleware.js";
-import { adminAuth } from "../../middlewares/adminAuth.middleware.js";
+import { brokerAdminAuth } from "../../middlewares/brokerAuth.middleware.js";
 
 const router = express.Router();
 
@@ -35,7 +35,7 @@ router.post("/:accountId/reset-trade-password",authMiddleware,resetTradePassword
 // watch password reset
 router.post("/:accountId/reset-watch-password",authMiddleware,resetWatchPasswordController);
 // admin reset passwords
-router.post("/admin/:accountId/reset-trade-password", authMiddleware, adminAuth, adminResetTradePasswordController);
-router.post("/admin/:accountId/reset-watch-password", authMiddleware, adminAuth, adminResetWatchPasswordController);
+router.post("/admin/:accountId/reset-trade-password", brokerAdminAuth, adminResetTradePasswordController);
+router.post("/admin/:accountId/reset-watch-password", brokerAdminAuth, adminResetWatchPasswordController);
 
 export default router;

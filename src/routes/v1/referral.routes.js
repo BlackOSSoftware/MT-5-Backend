@@ -1,6 +1,6 @@
 import express from "express";
 import { authMiddleware } from "../../middlewares/auth.middleware.js";
-import { adminAuth } from "../../middlewares/adminAuth.middleware.js";
+import { brokerAdminAuth } from "../../middlewares/brokerAuth.middleware.js";
 import {
   getMyReferralSummary,
   listMyReferralRewards,
@@ -27,46 +27,39 @@ router.post("/request", authMiddleware, requestReferralReward);
 // Admin routes — network report (before :rewardId routes)
 router.get(
   "/admin/users/:userId/summary",
-  authMiddleware,
-  adminAuth,
+  brokerAdminAuth,
   adminGetUserReferralSummary,
 );
 router.get(
   "/admin/network/summary",
-  authMiddleware,
-  adminAuth,
+  brokerAdminAuth,
   adminReferralNetworkSummary,
 );
 router.get(
   "/admin/network/links",
-  authMiddleware,
-  adminAuth,
+  brokerAdminAuth,
   adminListReferralLinks,
 );
 router.get(
   "/admin/network/:userId/tree",
-  authMiddleware,
-  adminAuth,
+  brokerAdminAuth,
   adminGetReferralTree,
 );
 router.get(
   "/admin/network",
-  authMiddleware,
-  adminAuth,
+  brokerAdminAuth,
   adminListReferralNetwork,
 );
 
-router.get("/admin/rewards", authMiddleware, adminAuth, adminListReferralRewards);
+router.get("/admin/rewards", brokerAdminAuth, adminListReferralRewards);
 router.patch(
   "/admin/:rewardId/approve",
-  authMiddleware,
-  adminAuth,
+  brokerAdminAuth,
   adminApproveReferralReward,
 );
 router.patch(
   "/admin/:rewardId/reject",
-  authMiddleware,
-  adminAuth,
+  brokerAdminAuth,
   adminRejectReferralReward,
 );
 

@@ -7,6 +7,10 @@ import Transaction from "../models/Transaction.model.js";
 import { generateReferralCode } from "../utils/referralCode.util.js";
 import EngineSync from "../trade-engine/EngineSync.js";
 import { publishAccountBalance } from "../trade-engine/EngineSyncBus.js";
+import {
+  assertUserBelongsToBroker,
+  getBrokerUserIds,
+} from "../utils/brokerScope.js";
 
 const REWARD_STATUSES = new Set(["ELIGIBLE", "REQUESTED", "APPROVED", "REJECTED"]);
 
@@ -275,6 +279,7 @@ export async function adminListReferralRewardsService({
   approvedTo,
   rejectedFrom,
   rejectedTo,
+  brokerId = null,
 }) {
   const safePage = Math.max(Number(page) || 1, 1);
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
@@ -321,6 +326,19 @@ export async function adminListReferralRewardsService({
       throw new Error("Invalid referredUserId");
     }
     filter.referred_user = referredUserId;
+  }
+
+  if (brokerId) {
+    const brokerUserIds = await getBrokerUserIds(brokerId);
+    const idSet = new Set((brokerUserIds || []).map((id) => String(id)));
+    if (filter.referrer_user != null) {
+      const requested = String(filter.referrer_user);
+      filter.referrer_user = idSet.has(requested)
+        ? filter.referrer_user
+        : { $in: [] };
+    } else {
+      filter.referrer_user = { $in: brokerUserIds || [] };
+    }
   }
 
   applyRange("createdAt", createdFrom, createdTo, "created");
@@ -399,12 +417,29 @@ export async function adminListReferralRewardsService({
   };
 }
 
-export async function adminApproveReferralRewardService({ adminId, rewardId }) {
+export async function adminApproveReferralRewardService({
+  adminId,
+  rewardId,
+  brokerId = null,
+}) {
   if (!mongoose.isValidObjectId(adminId)) {
     throw new Error("Invalid adminId");
   }
   if (!mongoose.isValidObjectId(rewardId)) {
     throw new Error("Invalid rewardId");
+  }
+
+  if (brokerId) {
+    const existing = await ReferralReward.findById(rewardId)
+      .select("referrer_user referred_user")
+      .lean();
+    if (!existing) {
+      throw new Error("Referral reward not found");
+    }
+    await assertUserBelongsToBroker(
+      existing.referrer_user || existing.referred_user,
+      brokerId,
+    );
   }
 
   const session = await mongoose.startSession();
@@ -520,12 +555,26 @@ export async function adminRejectReferralRewardService({
   adminId,
   rewardId,
   reason,
+  brokerId = null,
 }) {
   if (!mongoose.isValidObjectId(adminId)) {
     throw new Error("Invalid adminId");
   }
   if (!mongoose.isValidObjectId(rewardId)) {
     throw new Error("Invalid rewardId");
+  }
+
+  if (brokerId) {
+    const existing = await ReferralReward.findById(rewardId)
+      .select("referrer_user referred_user")
+      .lean();
+    if (!existing) {
+      throw new Error("Referral reward not found");
+    }
+    await assertUserBelongsToBroker(
+      existing.referrer_user || existing.referred_user,
+      brokerId,
+    );
   }
 
   const rejectionReason =

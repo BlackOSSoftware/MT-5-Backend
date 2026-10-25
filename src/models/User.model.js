@@ -31,6 +31,21 @@ const userSchema = new mongoose.Schema(
       index: true
     },
 
+    // Platform SuperAdmin (null = normal). Only bootstrap / platform API sets this.
+    platformRole: {
+      type: String,
+      default: null,
+      index: true,
+    },
+
+    // Client / primary broker scope (Broker Admins use BrokerMembership).
+    brokerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Broker',
+      default: null,
+      index: true,
+    },
+
     isMailVerified: {
       type: Boolean,
       default: false,

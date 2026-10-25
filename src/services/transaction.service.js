@@ -321,6 +321,9 @@ export async function adminListSwapDeductionsService({ query = {} }) {
       throw new Error("Invalid userId");
     }
     match.user = new mongoose.Types.ObjectId(query.userId);
+  } else if (query.brokerId) {
+    const { applyBrokerUserIdMatch } = await import("../utils/brokerScope.js");
+    await applyBrokerUserIdMatch(match, query.brokerId, "user");
   }
 
   if (query.accountId !== undefined) {

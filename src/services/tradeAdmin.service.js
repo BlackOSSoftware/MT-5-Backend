@@ -4,6 +4,10 @@ import User from "../models/User.model.js";
 import Account from "../models/Account.model.js";
 import mongoose from "mongoose";
 import Brokerage from "../models/Brokerage.model.js";
+import {
+  applyBrokerUserIdMatch,
+  getBrokerUserIds,
+} from "../utils/brokerScope.js";
 
 const TRADE_SIDES = new Set(["BUY", "SELL"]);
 const TRADE_ORDER_TYPES = new Set([
@@ -99,13 +103,24 @@ const attachUserAccountLabels = async (
   });
 };
 
-export const getTradeAdminSummaryService = async () => {
+export const getTradeAdminSummaryService = async (brokerId = null) => {
+  const brokerUserIds = await getBrokerUserIds(brokerId);
+  const tradeMatch = { status: "OPEN", isDeleted: { $ne: true } };
+  const pendingMatch = { status: "PENDING", isDeleted: { $ne: true } };
+  const userMatch = {};
+
+  if (brokerUserIds !== null) {
+    tradeMatch.userId = { $in: brokerUserIds };
+    pendingMatch.userId = { $in: brokerUserIds };
+    userMatch._id = { $in: brokerUserIds };
+  }
+
   const [activePositions, pendingOrders, activeUsers, activeTradingAccountIds] =
     await Promise.all([
-      Trade.countDocuments({ status: "OPEN", isDeleted: { $ne: true } }),
-      PendingOrder.countDocuments({ status: "PENDING", isDeleted: { $ne: true } }),
-      User.countDocuments({}),
-      Trade.distinct("accountId", { status: "OPEN", isDeleted: { $ne: true } })
+      Trade.countDocuments(tradeMatch),
+      PendingOrder.countDocuments(pendingMatch),
+      User.countDocuments(userMatch),
+      Trade.distinct("accountId", tradeMatch),
     ]);
 
   return {
@@ -131,6 +146,10 @@ export const adminListUsersFundsService = async (query = {}) => {
     String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   const match = {};
+
+  if (query.brokerId) {
+    match.brokerId = query.brokerId;
+  }
 
   if (typeof query.userId === "string" && query.userId.trim()) {
     if (!mongoose.isValidObjectId(query.userId)) {
@@ -364,6 +383,10 @@ export const adminListClosedTradesService = async (query = {}) => {
     match.orderType = { $in: mappedTypes };
   }
 
+  if (query.brokerId) {
+    await applyBrokerUserIdMatch(match, query.brokerId, "userId");
+  }
+
   const timeFieldRaw =
     typeof query.timeField === "string" ? query.timeField.trim() : "";
   const timeField = ["openTime", "closeTime", "createdAt"].includes(timeFieldRaw)
@@ -551,6 +574,10 @@ export const adminListOpenTradesService = async (query = {}) => {
     match.orderType = { $in: mappedTypes };
   }
 
+  if (query.brokerId) {
+    await applyBrokerUserIdMatch(match, query.brokerId, "userId");
+  }
+
   const timeFieldRaw =
     typeof query.timeField === "string" ? query.timeField.trim() : "";
   const timeField = ["openTime", "createdAt", "updatedAt"].includes(timeFieldRaw)
@@ -736,6 +763,10 @@ export const adminListPendingOrdersOpenService = async (query = {}) => {
       throw new Error("Invalid orderKind. Allowed: LIMIT, STOP");
     }
     match.orderType = { $in: mappedTypes };
+  }
+
+  if (query.brokerId) {
+    await applyBrokerUserIdMatch(match, query.brokerId, "userId");
   }
 
   const timeFieldRaw =
@@ -933,6 +964,10 @@ export const adminListPendingOrdersHistoryService = async (query = {}) => {
     match.orderType = { $in: mappedTypes };
   }
 
+  if (query.brokerId) {
+    await applyBrokerUserIdMatch(match, query.brokerId, "userId");
+  }
+
   const timeFieldRaw =
     typeof query.timeField === "string" ? query.timeField.trim() : "";
   const timeField = [
@@ -1081,6 +1116,10 @@ export const adminListBrokerageService = async (query = {}) => {
 
   if (query.symbol) {
     filter.symbol = String(query.symbol).trim().toUpperCase();
+  }
+
+  if (query.brokerId) {
+    await applyBrokerUserIdMatch(filter, query.brokerId, "user_id");
   }
 
   const from = typeof query.from === "string" ? new Date(query.from) : null;

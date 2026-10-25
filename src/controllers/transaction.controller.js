@@ -68,6 +68,11 @@ export async function adminGetUserTransactionHistory(req, res) {
     const sortBy = req.query.sortBy || "createdAt";
     const sortDir = req.query.sortDir || "desc";
 
+    if (req.brokerId) {
+      const { assertUserBelongsToBroker } = await import("../utils/brokerScope.js");
+      await assertUserBelongsToBroker(userId, req.brokerId);
+    }
+
     const result = await getAdminUserTransactionHistoryService({
       userId,
       accountId,
@@ -102,7 +107,10 @@ export async function adminGetUserTransactionHistory(req, res) {
  */
 export async function adminListSwapDeductions(req, res) {
   try {
-    const result = await adminListSwapDeductionsService({ query: req.query });
+    const { withBrokerQuery } = await import("../utils/brokerScope.js");
+    const result = await adminListSwapDeductionsService({
+      query: withBrokerQuery(req, req.query),
+    });
 
     return res.json({
       success: true,

@@ -18,6 +18,13 @@ const WithdrawalSchema = new mongoose.Schema(
       index: true,
     },
 
+    brokerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Broker",
+      default: null,
+      index: true,
+    },
+
     // AMOUNT
     amount: {
       type: Number,

@@ -7,7 +7,7 @@ import {
 } from '../../controllers/kyc.controller.js';
 
 import { authMiddleware } from '../../middlewares/auth.middleware.js';
-import { adminAuth } from '../../middlewares/adminAuth.middleware.js';
+import { brokerAdminAuth } from '../../middlewares/brokerAuth.middleware.js';
 
 const router = express.Router();
 
@@ -16,7 +16,7 @@ router.post('/', authMiddleware, submitKyc);
 router.get('/me', authMiddleware, getMyKyc);
 
 /* ADMIN */
-router.get('/admin', authMiddleware, adminAuth, getAllKycs);
-router.put('/admin/:kycId/status',authMiddleware,adminAuth,updateKycStatus);
+router.get('/admin', brokerAdminAuth, getAllKycs);
+router.put('/admin/:kycId/status', brokerAdminAuth, updateKycStatus);
 
 export default router;

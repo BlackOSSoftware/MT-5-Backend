@@ -28,6 +28,10 @@ import {
   adminListDeletedTradesService,
   adminRestoreTradeService,
 } from "../services/adminTradeDelete.service.js";
+import {
+  assertUserBelongsToBroker,
+  withBrokerQuery,
+} from "../utils/brokerScope.js";
 
 function normalizeSymbol(symbol) {
   return String(symbol || "").trim().toUpperCase();
@@ -74,7 +78,7 @@ function generateHistoryPositionId(index = 0) {
   return randomUUID();
 }
 
-async function getAccountForAdminTrade({ userId, accountId }) {
+async function getAccountForAdminTrade({ userId, accountId, brokerId = null }) {
   if (!userId || !mongoose.isValidObjectId(userId)) {
     throw new Error("Invalid userId");
   }
@@ -82,6 +86,8 @@ async function getAccountForAdminTrade({ userId, accountId }) {
   if (!accountId || !mongoose.isValidObjectId(accountId)) {
     throw new Error("Invalid accountId");
   }
+
+  await assertUserBelongsToBroker(userId, brokerId);
 
   const account = await Account.findOne({
     _id: new mongoose.Types.ObjectId(accountId),
@@ -273,7 +279,7 @@ async function ensurePendingOrderInEngine(accountDoc, orderKey, ipAddress) {
 
 export const getTradeAdminSummary = async (req, res) => {
   try {
-    const data = await getTradeAdminSummaryService();
+    const data = await getTradeAdminSummaryService(req.brokerId || null);
 
     return res.json({
       success: true,
@@ -289,7 +295,7 @@ export const getTradeAdminSummary = async (req, res) => {
 
 export const adminListBrokerage = async (req, res) => {
   try {
-    const result = await adminListBrokerageService(req.query);
+    const result = await adminListBrokerageService(withBrokerQuery(req, req.query));
 
     return res.json({
       success: true,
@@ -306,7 +312,7 @@ export const adminListBrokerage = async (req, res) => {
 
 export const adminListUsersFunds = async (req, res) => {
   try {
-    const result = await adminListUsersFundsService(req.query);
+    const result = await adminListUsersFundsService(withBrokerQuery(req, req.query));
 
     return res.json({
       success: true,
@@ -323,7 +329,7 @@ export const adminListUsersFunds = async (req, res) => {
 
 export const adminListOpenTrades = async (req, res) => {
   try {
-    const result = await adminListOpenTradesService(req.query);
+    const result = await adminListOpenTradesService(withBrokerQuery(req, req.query));
 
     return res.json({
       success: true,
@@ -340,7 +346,7 @@ export const adminListOpenTrades = async (req, res) => {
 
 export const adminListClosedTrades = async (req, res) => {
   try {
-    const result = await adminListClosedTradesService(req.query);
+    const result = await adminListClosedTradesService(withBrokerQuery(req, req.query));
 
     return res.json({
       success: true,
@@ -357,7 +363,9 @@ export const adminListClosedTrades = async (req, res) => {
 
 export const adminListPendingOrdersOpen = async (req, res) => {
   try {
-    const result = await adminListPendingOrdersOpenService(req.query);
+    const result = await adminListPendingOrdersOpenService(
+      withBrokerQuery(req, req.query)
+    );
 
     return res.json({
       success: true,
@@ -374,7 +382,9 @@ export const adminListPendingOrdersOpen = async (req, res) => {
 
 export const adminListPendingOrdersHistory = async (req, res) => {
   try {
-    const result = await adminListPendingOrdersHistoryService(req.query);
+    const result = await adminListPendingOrdersHistoryService(
+      withBrokerQuery(req, req.query)
+    );
 
     return res.json({
       success: true,
@@ -412,6 +422,8 @@ export const adminPlaceMarketOrder = async (req, res) => {
       });
     }
 
+    await assertUserBelongsToBroker(userId, req.brokerId);
+
     const sideUpper = String(side).trim().toUpperCase();
     if (sideUpper !== "BUY" && sideUpper !== "SELL") {
       return res.status(400).json({
@@ -428,7 +440,11 @@ export const adminPlaceMarketOrder = async (req, res) => {
       });
     }
 
-    const account = await getAccountForAdminTrade({ userId, accountId });
+    const account = await getAccountForAdminTrade({
+      userId,
+      accountId,
+      brokerId: req.brokerId,
+    });
     const ip = getRequestIp(req);
     ensureEngineAccountLoaded(account, ip);
 
@@ -484,6 +500,8 @@ export const adminPlacePendingOrder = async (req, res) => {
       });
     }
 
+    await assertUserBelongsToBroker(userId, req.brokerId);
+
     const sideUpper = String(side).trim().toUpperCase();
     if (sideUpper !== "BUY" && sideUpper !== "SELL") {
       return res.status(400).json({
@@ -502,7 +520,11 @@ export const adminPlacePendingOrder = async (req, res) => {
       });
     }
 
-    const account = await getAccountForAdminTrade({ userId, accountId });
+    const account = await getAccountForAdminTrade({
+      userId,
+      accountId,
+      brokerId: req.brokerId,
+    });
     const ip = getRequestIp(req);
     ensureEngineAccountLoaded(account, ip);
 
@@ -544,6 +566,8 @@ export const adminModifyPendingOrder = async (req, res) => {
       });
     }
 
+    await assertUserBelongsToBroker(userId, req.brokerId);
+
     const normalized = normalizePendingOrderEdit({
       price,
       volume,
@@ -551,7 +575,11 @@ export const adminModifyPendingOrder = async (req, res) => {
       takeProfit,
     });
 
-    const account = await getAccountForAdminTrade({ userId, accountId });
+    const account = await getAccountForAdminTrade({
+      userId,
+      accountId,
+      brokerId: req.brokerId,
+    });
     const ip = getRequestIp(req);
     const resolvedOrderId = await ensurePendingOrderInEngine(
       account,
@@ -596,7 +624,13 @@ export const adminCancelPendingOrder = async (req, res) => {
       });
     }
 
-    const account = await getAccountForAdminTrade({ userId, accountId });
+    await assertUserBelongsToBroker(userId, req.brokerId);
+
+    const account = await getAccountForAdminTrade({
+      userId,
+      accountId,
+      brokerId: req.brokerId,
+    });
     const ip = getRequestIp(req);
     ensureEngineAccountLoaded(account, ip);
 
@@ -630,6 +664,8 @@ export const adminModifyPosition = async (req, res) => {
       });
     }
 
+    await assertUserBelongsToBroker(userId, req.brokerId);
+
     const normalized = normalizeLivePositionEdit({
       volume,
       openPrice,
@@ -637,7 +673,11 @@ export const adminModifyPosition = async (req, res) => {
       takeProfit,
     });
 
-    const account = await getAccountForAdminTrade({ userId, accountId });
+    const account = await getAccountForAdminTrade({
+      userId,
+      accountId,
+      brokerId: req.brokerId,
+    });
     const ip = getRequestIp(req);
     const resolvedPositionId = await ensureOpenPositionInEngine(
       account,
@@ -690,8 +730,12 @@ export const adminModifyPosition = async (req, res) => {
 
 export const adminModifyClosedTrade = async (req, res) => {
   try {
+    const body = req.body || {};
+    if (body.userId) {
+      await assertUserBelongsToBroker(body.userId, req.brokerId);
+    }
     const actorId = req.user?._id || req.user?.id || null;
-    const result = await adminEditClosedTradeService(req.body || {}, {
+    const result = await adminEditClosedTradeService(body, {
       actorId,
     });
     return res.json({ success: true, data: result });
@@ -705,8 +749,12 @@ export const adminModifyClosedTrade = async (req, res) => {
 
 export const adminDeleteTrade = async (req, res) => {
   try {
+    const body = req.body || {};
+    if (body.userId) {
+      await assertUserBelongsToBroker(body.userId, req.brokerId);
+    }
     const actorId = req.user?._id || req.user?.id || null;
-    const result = await adminDeleteTradeService(req.body || {}, { actorId });
+    const result = await adminDeleteTradeService(body, { actorId });
     return res.json({ success: true, data: result });
   } catch (error) {
     return res.status(400).json({
@@ -718,8 +766,12 @@ export const adminDeleteTrade = async (req, res) => {
 
 export const adminRestoreTrade = async (req, res) => {
   try {
+    const body = req.body || {};
+    if (body.userId) {
+      await assertUserBelongsToBroker(body.userId, req.brokerId);
+    }
     const actorId = req.user?._id || req.user?.id || null;
-    const result = await adminRestoreTradeService(req.body || {}, { actorId });
+    const result = await adminRestoreTradeService(body, { actorId });
     return res.json({ success: true, data: result });
   } catch (error) {
     return res.status(400).json({
@@ -731,7 +783,9 @@ export const adminRestoreTrade = async (req, res) => {
 
 export const adminListDeletedTrades = async (req, res) => {
   try {
-    const result = await adminListDeletedTradesService(req.query || {});
+    const result = await adminListDeletedTradesService(
+      withBrokerQuery(req, req.query || {})
+    );
     return res.json({
       success: true,
       data: result.items,
@@ -756,7 +810,13 @@ export const adminClosePosition = async (req, res) => {
       });
     }
 
-    const account = await getAccountForAdminTrade({ userId, accountId });
+    await assertUserBelongsToBroker(userId, req.brokerId);
+
+    const account = await getAccountForAdminTrade({
+      userId,
+      accountId,
+      brokerId: req.brokerId,
+    });
     const ip = getRequestIp(req);
     const resolvedPositionId = await ensureOpenPositionInEngine(
       account,
@@ -791,6 +851,8 @@ export const adminBulkCreatePositionHistory = async (req, res) => {
       });
     }
 
+    await assertUserBelongsToBroker(userId, req.brokerId);
+
     if (!Array.isArray(positions) || positions.length === 0) {
       return res.status(400).json({
         success: false,
@@ -805,7 +867,11 @@ export const adminBulkCreatePositionHistory = async (req, res) => {
       });
     }
 
-    const account = await getAccountForAdminTrade({ userId, accountId });
+    const account = await getAccountForAdminTrade({
+      userId,
+      accountId,
+      brokerId: req.brokerId,
+    });
     const ipAddress = getRequestIp(req);
 
     const symbolSet = new Set();

@@ -4,6 +4,7 @@ import {
   adminCreditBonusService,
   adminCreditTradableFundService,
 } from "../services/bonus.service.js";
+import { assertUserBelongsToBroker } from "../utils/brokerScope.js";
 
 export async function adminGetBonusSettings(req, res) {
   try {
@@ -35,6 +36,9 @@ export async function adminUpdateBonusSettings(req, res) {
 export async function adminCreditBonus(req, res) {
   try {
     const { userId, accountId, amount, bonusAmount, reason } = req.body || {};
+    if (req.brokerId) {
+      await assertUserBelongsToBroker(userId, req.brokerId);
+    }
     const data = await adminCreditBonusService({
       adminId: req.user?._id || null,
       userId,
@@ -49,13 +53,16 @@ export async function adminCreditBonus(req, res) {
       data,
     });
   } catch (err) {
-    return res.status(400).json({ success: false, message: err.message });
+    return res.status(err.status || 400).json({ success: false, message: err.message });
   }
 }
 
 export async function adminCreditTradableFund(req, res) {
   try {
     const { userId, accountId, amount, tradableFundAmount, reason } = req.body || {};
+    if (req.brokerId) {
+      await assertUserBelongsToBroker(userId, req.brokerId);
+    }
     const data = await adminCreditTradableFundService({
       adminId: req.user?._id || null,
       userId,
@@ -70,6 +77,6 @@ export async function adminCreditTradableFund(req, res) {
       data,
     });
   } catch (err) {
-    return res.status(400).json({ success: false, message: err.message });
+    return res.status(err.status || 400).json({ success: false, message: err.message });
   }
 }

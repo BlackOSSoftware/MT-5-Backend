@@ -84,7 +84,8 @@ export async function adminGetAllDeposits(req, res) {
     const filters = {
       status: req.query.status,
       fromDate: req.query.fromDate,
-      toDate: req.query.toDate
+      toDate: req.query.toDate,
+      ...(req.brokerId ? { brokerId: req.brokerId } : {}),
     };
 
     const result = await adminGetAllDepositsService({
@@ -111,7 +112,10 @@ export async function adminGetAllDeposits(req, res) {
 /* ADMIN: SEARCH */
 export async function adminSearchDeposits(req, res) {
   try {
-    const result = await adminSearchDepositsService(req.query);
+    const result = await adminSearchDepositsService({
+      ...req.query,
+      ...(req.brokerId ? { brokerId: req.brokerId } : {}),
+    });
 
     return res.json({
       success: true,

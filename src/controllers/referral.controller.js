@@ -14,6 +14,8 @@ import {
   adminListReferralNetworkService,
   adminReferralNetworkSummaryService,
 } from "../services/referralReport.service.js";
+import ReferralReward from "../models/ReferralReward.model.js";
+import { assertUserBelongsToBroker } from "../utils/brokerScope.js";
 
 export async function getMyReferralSummary(req, res) {
   try {
@@ -26,10 +28,12 @@ export async function getMyReferralSummary(req, res) {
 
 export async function adminGetUserReferralSummary(req, res) {
   try {
+    const brokerId = req.brokerId || null;
+    await assertUserBelongsToBroker(req.params.userId, brokerId);
     const data = await getAdminUserReferralSummaryService(req.params.userId);
     return res.status(200).json({ success: true, data });
   } catch (err) {
-    return res.status(400).json({ success: false, message: err.message });
+    return res.status(err.status || 400).json({ success: false, message: err.message });
   }
 }
 
@@ -111,6 +115,7 @@ export async function adminListReferralRewards(req, res) {
       approvedTo,
       rejectedFrom,
       rejectedTo,
+      brokerId: req.brokerId || null,
     });
     return res.status(200).json({ success: true, ...result });
   } catch (err) {
@@ -118,11 +123,28 @@ export async function adminListReferralRewards(req, res) {
   }
 }
 
+async function assertRewardBelongsToBroker(rewardId, brokerId) {
+  if (!brokerId) return;
+  const reward = await ReferralReward.findById(rewardId)
+    .select("referrer_user referred_user")
+    .lean();
+  if (!reward) {
+    const err = new Error("Referral reward not found");
+    err.status = 404;
+    throw err;
+  }
+  const scopedUserId = reward.referrer_user || reward.referred_user;
+  await assertUserBelongsToBroker(scopedUserId, brokerId);
+}
+
 export async function adminApproveReferralReward(req, res) {
   try {
+    const brokerId = req.brokerId || null;
+    await assertRewardBelongsToBroker(req.params.rewardId, brokerId);
     const data = await adminApproveReferralRewardService({
       adminId: req.user._id,
       rewardId: req.params.rewardId,
+      brokerId,
     });
     return res.status(200).json({
       success: true,
@@ -130,17 +152,20 @@ export async function adminApproveReferralReward(req, res) {
       data,
     });
   } catch (err) {
-    return res.status(400).json({ success: false, message: err.message });
+    return res.status(err.status || 400).json({ success: false, message: err.message });
   }
 }
 
 export async function adminRejectReferralReward(req, res) {
   try {
+    const brokerId = req.brokerId || null;
+    await assertRewardBelongsToBroker(req.params.rewardId, brokerId);
     const { reason } = req.body;
     const data = await adminRejectReferralRewardService({
       adminId: req.user._id,
       rewardId: req.params.rewardId,
       reason,
+      brokerId,
     });
     return res.status(200).json({
       success: true,
@@ -148,13 +173,15 @@ export async function adminRejectReferralReward(req, res) {
       data,
     });
   } catch (err) {
-    return res.status(400).json({ success: false, message: err.message });
+    return res.status(err.status || 400).json({ success: false, message: err.message });
   }
 }
 
 export async function adminReferralNetworkSummary(req, res) {
   try {
-    const data = await adminReferralNetworkSummaryService();
+    const data = await adminReferralNetworkSummaryService({
+      brokerId: req.brokerId || null,
+    });
     return res.status(200).json({ success: true, data });
   } catch (err) {
     return res.status(400).json({ success: false, message: err.message });
@@ -172,6 +199,7 @@ export async function adminListReferralNetwork(req, res) {
         onlyReferrers === undefined
           ? true
           : String(onlyReferrers).toLowerCase() !== "false",
+      brokerId: req.brokerId || null,
     });
     return res.status(200).json({ success: true, ...result });
   } catch (err) {
@@ -186,6 +214,7 @@ export async function adminListReferralLinks(req, res) {
       q,
       page: Number(page),
       limit: Number(limit),
+      brokerId: req.brokerId || null,
     });
     return res.status(200).json({ success: true, ...result });
   } catch (err) {
@@ -195,12 +224,15 @@ export async function adminListReferralLinks(req, res) {
 
 export async function adminGetReferralTree(req, res) {
   try {
+    const brokerId = req.brokerId || null;
+    await assertUserBelongsToBroker(req.params.userId, brokerId);
     const { maxDepth } = req.query;
     const data = await adminGetReferralTreeService(req.params.userId, {
       maxDepth: maxDepth ? Number(maxDepth) : 8,
+      brokerId,
     });
     return res.status(200).json({ success: true, data });
   } catch (err) {
-    return res.status(400).json({ success: false, message: err.message });
+    return res.status(err.status || 400).json({ success: false, message: err.message });
   }
 }

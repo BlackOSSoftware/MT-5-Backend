@@ -34,7 +34,7 @@ export async function authMiddleware(req, res, next) {
 
     // 🔥 updated fields
     const user = await User.findById(decoded.uid)
-      .select('_id userType isMailVerified')
+      .select('_id userType isMailVerified platformRole brokerId name email')
       .lean();
 
     if (!user) {

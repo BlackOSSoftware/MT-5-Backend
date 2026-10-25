@@ -146,8 +146,10 @@ export async function deletePlan(id) {
 
 /* ================= ADMIN ================= */
 
-export async function getAllPlansAdmin() {
-  return AccountPlan.find().sort({ createdAt: -1 }).lean();
+export async function getAllPlansAdmin(brokerId = null) {
+  const filter = {};
+  if (brokerId) filter.brokerId = brokerId;
+  return AccountPlan.find(filter).sort({ createdAt: -1 }).lean();
 }
 
 /* ================= USER ================= */

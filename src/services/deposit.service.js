@@ -269,6 +269,10 @@ export async function adminGetAllDepositsService({ page, limit, filters }) {
     query.status = filters.status;
   }
 
+  if (filters?.brokerId) {
+    query.brokerId = filters.brokerId;
+  }
+
   if (filters?.fromDate || filters?.toDate) {
     query.createdAt = {};
     if (filters.fromDate) {
@@ -334,6 +338,10 @@ export async function adminSearchDepositsService(query = {}) {
   const skip = (page - 1) * limit;
 
   const match = {};
+
+  if (query.brokerId) {
+    match.brokerId = query.brokerId;
+  }
 
   const statusRaw =
     typeof query.status === "string" ? query.status.trim().toUpperCase() : "";

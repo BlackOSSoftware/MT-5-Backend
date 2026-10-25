@@ -8,11 +8,11 @@ const app = express();
 // updated
 app.disable('x-powered-by');
 
-app.use(
-  cors({
-origin: [
+const staticOrigins = new Set([
   "http://localhost:3000",
   "http://localhost:3001",
+  "http://127.0.0.1:3000",
+  "http://127.0.0.1:3001",
   "https://trade-portal-uiub.vercel.app",
   "https://admin-dashboard-wheat-pi-59.vercel.app",
   "http://localhost:5173",
@@ -21,13 +21,42 @@ origin: [
   "https://admin.fptradess.com",
   "https://user.fptrades.com",
   "https://user.fptradess.com",
-],
+]);
 
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-    // Frontend preflight may include Cache-Control/Pragma; allow them explicitly to avoid CORS failures.
-    allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'Pragma'],
-    credentials: true
-  })
+function isLocalDevOrigin(origin) {
+  if (!origin) return false;
+  try {
+    const u = new URL(origin);
+    if (!["localhost", "127.0.0.1"].includes(u.hostname) && !/^192\.168\./.test(u.hostname) && !/^10\./.test(u.hostname) && !/^172\.(1[6-9]|2\d|3[0-1])\./.test(u.hostname)) {
+      return false;
+    }
+    return u.port === "3000" || u.port === "3001" || u.port === "5173";
+  } catch {
+    return false;
+  }
+}
+
+app.use(
+  cors({
+    origin(origin, cb) {
+      if (!origin || staticOrigins.has(origin) || isLocalDevOrigin(origin)) {
+        return cb(null, true);
+      }
+      return cb(null, false);
+    },
+
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    // Frontend preflight may include Cache-Control/Pragma/x-broker-id.
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "Cache-Control",
+      "Pragma",
+      "x-broker-id",
+      "X-Broker-Id",
+    ],
+    credentials: true,
+  }),
 );
 
 app.use(express.json({ limit: '1mb' }));

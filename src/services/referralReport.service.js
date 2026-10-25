@@ -9,6 +9,10 @@ import {
   normalizeId,
   summarizeDownline,
 } from "./referralReport.helpers.js";
+import {
+  assertUserBelongsToBroker,
+  getBrokerUserIds,
+} from "../utils/brokerScope.js";
 
 function toUserCard(user) {
   if (!user) return null;
@@ -22,8 +26,13 @@ function toUserCard(user) {
   };
 }
 
-async function loadAllReferralRows() {
-  return Referral.find({})
+async function loadAllReferralRows(brokerId = null) {
+  const filter = {};
+  if (brokerId) {
+    const brokerUserIds = await getBrokerUserIds(brokerId);
+    filter.user_id = { $in: brokerUserIds || [] };
+  }
+  return Referral.find(filter)
     .select("user_id referred_by referral_code status total_referrals total_earned referral_balance createdAt")
     .lean();
 }
@@ -54,8 +63,10 @@ function rowsForHelpers(docs) {
   }));
 }
 
-export async function adminReferralNetworkSummaryService() {
-  const docs = await loadAllReferralRows();
+export async function adminReferralNetworkSummaryService({
+  brokerId = null,
+} = {}) {
+  const docs = await loadAllReferralRows(brokerId);
   const rows = rowsForHelpers(docs);
   const global = computeGlobalLevelCounts(rows);
 
@@ -77,10 +88,11 @@ export async function adminListReferralNetworkService({
   page = 1,
   limit = 20,
   onlyReferrers = true,
+  brokerId = null,
 } = {}) {
   const safePage = Math.max(Number(page) || 1, 1);
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
-  const docs = await loadAllReferralRows();
+  const docs = await loadAllReferralRows(brokerId);
   const rows = rowsForHelpers(docs);
   const childrenByParent = buildChildrenMap(rows);
 
@@ -163,10 +175,11 @@ export async function adminListReferralLinksService({
   q = "",
   page = 1,
   limit = 20,
+  brokerId = null,
 } = {}) {
   const safePage = Math.max(Number(page) || 1, 1);
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
-  const docs = await loadAllReferralRows();
+  const docs = await loadAllReferralRows(brokerId);
   const rows = rowsForHelpers(docs);
   const userIds = [];
   for (const r of rows) {
@@ -210,13 +223,18 @@ export async function adminListReferralLinksService({
 /**
  * Full tree for one user: Person → their referrals → nested.
  */
-export async function adminGetReferralTreeService(userId, { maxDepth = 8 } = {}) {
+export async function adminGetReferralTreeService(
+  userId,
+  { maxDepth = 8, brokerId = null } = {},
+) {
   if (!mongoose.isValidObjectId(userId)) {
     throw new Error("Invalid userId");
   }
 
+  await assertUserBelongsToBroker(userId, brokerId);
+
   const safeDepth = Math.min(Math.max(Number(maxDepth) || 8, 1), 15);
-  const docs = await loadAllReferralRows();
+  const docs = await loadAllReferralRows(brokerId);
   const rows = rowsForHelpers(docs);
   const childrenByParent = buildChildrenMap(rows);
   const stats = summarizeDownline(userId, childrenByParent, safeDepth);

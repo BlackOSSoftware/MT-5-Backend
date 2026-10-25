@@ -10,6 +10,14 @@ const AccountSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Multi-broker tenant
+    brokerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Broker",
+      default: null,
+      index: true,
+    },
+
     // PLAN REFERENCE
     account_plan_id: {
       type: mongoose.Schema.Types.ObjectId,

@@ -62,6 +62,10 @@ const buildFilter = ({ userId, query, isAdmin }) => {
     filter.method = query.method;
   }
 
+  if (query.brokerId) {
+    filter.brokerId = query.brokerId;
+  }
+
   const { from, to } = parseDateRange(query);
 
   if (from || to) {

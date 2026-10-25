@@ -152,7 +152,8 @@ export async function getAllActivityService({
   action = null,
   userId = null,
   actorType = null,
-  includeUser = false
+  includeUser = false,
+  brokerId = null,
 }) {
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
 
@@ -171,6 +172,10 @@ export async function getAllActivityService({
       throw new Error('Invalid userId');
     }
     filter.user_id = userId;
+  } else if (brokerId) {
+    const { getBrokerUserIds } = await import('../utils/brokerScope.js');
+    const ids = await getBrokerUserIds(brokerId);
+    filter.user_id = { $in: ids || [] };
   }
 
   applyCursorFilter(filter, before);

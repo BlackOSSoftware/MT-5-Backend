@@ -3,8 +3,7 @@ import {
   createInquiry,
   getInquiries
 } from '../../controllers/inquiry.controller.js';
-import { adminAuth } from '../../middlewares/adminAuth.middleware.js';
-import { authMiddleware } from '../../middlewares/auth.middleware.js';
+import { brokerAdminAuth } from '../../middlewares/brokerAuth.middleware.js';
 
 const router = express.Router();
 
@@ -16,6 +15,6 @@ router.post('/', createInquiry);
 /**
  * ADMIN
  */
-router.get('/', authMiddleware,adminAuth, getInquiries);
+router.get('/', brokerAdminAuth, getInquiries);
 
 export default router;

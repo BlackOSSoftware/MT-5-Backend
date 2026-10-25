@@ -10,7 +10,10 @@ import {
 
 export const createAccountPlan = async (req, res) => {
   try {
-    const plan = await createPlan(req.body);
+    const plan = await createPlan({
+      ...req.body,
+      ...(req.brokerId ? { brokerId: req.brokerId } : {}),
+    });
     return res.json({ success: true, data: plan });
   } catch (err) {
     return res.status(400).json({ success: false, message: err.message });
@@ -36,7 +39,7 @@ export const deleteAccountPlan = async (req, res) => {
 };
 
 export const getPlansAdmin = async (req, res) => {
-  const plans = await getAllPlansAdmin();
+  const plans = await getAllPlansAdmin(req.brokerId || null);
   return res.json({ success: true, data: plans });
 };
 

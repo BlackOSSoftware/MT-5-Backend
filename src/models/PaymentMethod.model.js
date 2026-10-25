@@ -9,6 +9,13 @@ const paymentMethodSchema = new mongoose.Schema(
       index: true
     },
 
+    brokerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Broker',
+      default: null,
+      index: true,
+    },
+
     title: {
       type: String,
       required: true

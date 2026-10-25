@@ -20,6 +20,13 @@ const TradeSchema = new mongoose.Schema(
       index: true,
     },
 
+    brokerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Broker",
+      default: null,
+      index: true,
+    },
+
     ipAddress: {
       type: String,
       required: true,

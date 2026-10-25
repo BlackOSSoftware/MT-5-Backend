@@ -5,7 +5,14 @@ const AccountPlanSchema = new mongoose.Schema(
     name: {
       type: String,
       required: true,
-      unique: true // STANDARD / RAW / ECN / PREMIUM etc
+      // unique per broker (compound index below) — legacy global unique removed
+    },
+
+    brokerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Broker",
+      default: null,
+      index: true,
     },
 
     // ✅ DEFAULT PLAN SPREAD (PIPS)
@@ -87,6 +94,12 @@ const AccountPlanSchema = new mongoose.Schema(
     timestamps: true,
     versionKey: false
   }
+);
+
+// Plan name unique per broker (null broker = legacy until migrate).
+AccountPlanSchema.index(
+  { brokerId: 1, name: 1 },
+  { unique: true, name: "uniq_broker_plan_name" }
 );
 
 export default mongoose.model('AccountPlan', AccountPlanSchema);

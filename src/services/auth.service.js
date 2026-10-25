@@ -312,12 +312,36 @@ export async function loginService({
     });
   }
 
-  // 7 Return tokens + role
+  // 7 Return tokens + role + broker memberships (multi-tenant)
+  let memberships = [];
+  try {
+    const BrokerMembership = (await import("../models/BrokerMembership.model.js")).default;
+    const Broker = (await import("../models/Broker.model.js")).default;
+    const rows = await BrokerMembership.find({
+      userId: user._id,
+      status: "ACTIVE",
+    }).lean();
+    const brokerIds = rows.map((r) => r.brokerId);
+    const brokers = await Broker.find({ _id: { $in: brokerIds } })
+      .select("code displayName status")
+      .lean();
+    const byId = new Map(brokers.map((b) => [String(b._id), b]));
+    memberships = rows.map((r) => ({
+      brokerId: r.brokerId,
+      role: r.role,
+      permissions: r.permissions || [],
+      broker: byId.get(String(r.brokerId)) || null,
+    }));
+  } catch (_) {}
+
   return {
     accessToken: signAccessToken(user),
     refreshToken,
     role: user.userType,
-    isMailVerified: user.isMailVerified
+    platformRole: user.platformRole || null,
+    brokerId: user.brokerId || null,
+    memberships,
+    isMailVerified: user.isMailVerified,
   };
 }
 

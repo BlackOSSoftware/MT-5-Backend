@@ -39,6 +39,10 @@ export async function getMyActivity(req, res) {
 export async function adminGetUserActivity(req, res) {
   try {
     const { userId } = req.params;
+    if (req.brokerId) {
+      const { assertUserBelongsToBroker } = await import("../utils/brokerScope.js");
+      await assertUserBelongsToBroker(userId, req.brokerId);
+    }
     const limit = Number(req.query.limit) || 20;
     const before = req.query.before || null;
     const includeUser = true;
@@ -79,7 +83,8 @@ export async function adminListActivity(req, res) {
       action,
       userId,
       actorType,
-      includeUser
+      includeUser,
+      brokerId: req.brokerId || null,
     });
 
     return res.json({

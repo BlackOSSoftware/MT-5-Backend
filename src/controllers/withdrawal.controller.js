@@ -36,7 +36,10 @@ export const listUserWithdrawalsController = async (req, res) => {
 
 export const listAdminWithdrawalsController = async (req, res) => {
   const result = await listAdminWithdrawals({
-    query: req.query,
+    query: {
+      ...req.query,
+      ...(req.brokerId ? { brokerId: req.brokerId } : {}),
+    },
   });
 
   return res.status(result.statusCode).json({

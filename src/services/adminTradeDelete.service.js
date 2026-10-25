@@ -14,6 +14,7 @@ import {
   ACTOR_TYPES,
   recordActivity,
 } from "./activity.service.js";
+import { applyBrokerUserIdMatch } from "../utils/brokerScope.js";
 
 async function applyAccountBalance(account, delta) {
   if (!delta) return Number(account.balance) || 0;
@@ -307,6 +308,11 @@ export async function adminListDeletedTradesService(query = {}) {
     const sym = query.symbol.trim().toUpperCase();
     tradeMatch.symbol = sym;
     pendingMatch.symbol = sym;
+  }
+
+  if (query.brokerId) {
+    await applyBrokerUserIdMatch(tradeMatch, query.brokerId, "userId");
+    await applyBrokerUserIdMatch(pendingMatch, query.brokerId, "userId");
   }
 
   const [trades, pendings] = await Promise.all([
