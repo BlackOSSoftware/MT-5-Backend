@@ -76,7 +76,8 @@ const depositSchema = new mongoose.Schema(
 
     ipAddress: {
       type: String,
-      required: true
+      required: true,
+      default: '127.0.0.1'
     }
   },
   { timestamps: true }

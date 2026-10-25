@@ -1,15 +1,32 @@
 import {
   getReferralSummaryService,
+  getAdminUserReferralSummaryService,
   listReferralRewardsService,
+  listMyDirectReferralsService,
   requestReferralRewardService,
   adminListReferralRewardsService,
   adminApproveReferralRewardService,
   adminRejectReferralRewardService,
 } from "../services/referral.service.js";
+import {
+  adminGetReferralTreeService,
+  adminListReferralLinksService,
+  adminListReferralNetworkService,
+  adminReferralNetworkSummaryService,
+} from "../services/referralReport.service.js";
 
 export async function getMyReferralSummary(req, res) {
   try {
     const data = await getReferralSummaryService(req.user._id);
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function adminGetUserReferralSummary(req, res) {
+  try {
+    const data = await getAdminUserReferralSummaryService(req.params.userId);
     return res.status(200).json({ success: true, data });
   } catch (err) {
     return res.status(400).json({ success: false, message: err.message });
@@ -22,6 +39,20 @@ export async function listMyReferralRewards(req, res) {
     const result = await listReferralRewardsService({
       userId: req.user._id,
       status,
+      page: Number(page),
+      limit: Number(limit),
+    });
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function listMyDirectReferrals(req, res) {
+  try {
+    const { page = 1, limit = 50 } = req.query;
+    const result = await listMyDirectReferralsService({
+      userId: req.user._id,
       page: Number(page),
       limit: Number(limit),
     });
@@ -116,6 +147,59 @@ export async function adminRejectReferralReward(req, res) {
       message: "Referral reward rejected",
       data,
     });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function adminReferralNetworkSummary(req, res) {
+  try {
+    const data = await adminReferralNetworkSummaryService();
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function adminListReferralNetwork(req, res) {
+  try {
+    const { q, page = 1, limit = 20, onlyReferrers } = req.query;
+    const result = await adminListReferralNetworkService({
+      q,
+      page: Number(page),
+      limit: Number(limit),
+      onlyReferrers:
+        onlyReferrers === undefined
+          ? true
+          : String(onlyReferrers).toLowerCase() !== "false",
+    });
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function adminListReferralLinks(req, res) {
+  try {
+    const { q, page = 1, limit = 20 } = req.query;
+    const result = await adminListReferralLinksService({
+      q,
+      page: Number(page),
+      limit: Number(limit),
+    });
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function adminGetReferralTree(req, res) {
+  try {
+    const { maxDepth } = req.query;
+    const data = await adminGetReferralTreeService(req.params.userId, {
+      maxDepth: maxDepth ? Number(maxDepth) : 8,
+    });
+    return res.status(200).json({ success: true, data });
   } catch (err) {
     return res.status(400).json({ success: false, message: err.message });
   }

@@ -4,10 +4,16 @@ import { adminAuth } from "../../middlewares/adminAuth.middleware.js";
 import {
   getMyReferralSummary,
   listMyReferralRewards,
+  listMyDirectReferrals,
   requestReferralReward,
   adminListReferralRewards,
   adminApproveReferralReward,
   adminRejectReferralReward,
+  adminReferralNetworkSummary,
+  adminListReferralNetwork,
+  adminListReferralLinks,
+  adminGetReferralTree,
+  adminGetUserReferralSummary,
 } from "../../controllers/referral.controller.js";
 
 const router = express.Router();
@@ -15,9 +21,41 @@ const router = express.Router();
 // User routes
 router.get("/summary", authMiddleware, getMyReferralSummary);
 router.get("/rewards", authMiddleware, listMyReferralRewards);
+router.get("/mine", authMiddleware, listMyDirectReferrals);
 router.post("/request", authMiddleware, requestReferralReward);
 
-// Admin routes
+// Admin routes — network report (before :rewardId routes)
+router.get(
+  "/admin/users/:userId/summary",
+  authMiddleware,
+  adminAuth,
+  adminGetUserReferralSummary,
+);
+router.get(
+  "/admin/network/summary",
+  authMiddleware,
+  adminAuth,
+  adminReferralNetworkSummary,
+);
+router.get(
+  "/admin/network/links",
+  authMiddleware,
+  adminAuth,
+  adminListReferralLinks,
+);
+router.get(
+  "/admin/network/:userId/tree",
+  authMiddleware,
+  adminAuth,
+  adminGetReferralTree,
+);
+router.get(
+  "/admin/network",
+  authMiddleware,
+  adminAuth,
+  adminListReferralNetwork,
+);
+
 router.get("/admin/rewards", authMiddleware, adminAuth, adminListReferralRewards);
 router.patch(
   "/admin/:rewardId/approve",

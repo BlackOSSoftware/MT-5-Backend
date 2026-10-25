@@ -29,13 +29,7 @@ async function ensureReferralProfile(userId, session = null) {
   ).lean();
 }
 
-export async function getReferralSummaryService(userId) {
-  if (!mongoose.isValidObjectId(userId)) {
-    throw new Error("Invalid userId");
-  }
-
-  const referral = await ensureReferralProfile(userId);
-
+async function buildReferralSummaryPayload(userId, referral) {
   const pendingAgg = await ReferralReward.aggregate([
     {
       $match: {
@@ -61,6 +55,39 @@ export async function getReferralSummaryService(userId) {
     totalEarned: referral?.total_earned || 0,
     pendingCount: pending.count || 0,
     pendingAmount: pending.amount || 0,
+    status: referral?.status || null,
+    referredBy: referral?.referred_by ? String(referral.referred_by) : null,
+  };
+}
+
+export async function getReferralSummaryService(userId) {
+  if (!mongoose.isValidObjectId(userId)) {
+    throw new Error("Invalid userId");
+  }
+
+  const referral = await ensureReferralProfile(userId);
+  return buildReferralSummaryPayload(userId, referral);
+}
+
+/** Admin read-only summary — does not create a referral profile. */
+export async function getAdminUserReferralSummaryService(userId) {
+  if (!mongoose.isValidObjectId(userId)) {
+    throw new Error("Invalid userId");
+  }
+
+  const referral = await Referral.findOne({ user_id: userId }).lean();
+  return buildReferralSummaryPayload(userId, referral);
+}
+
+function toPublicUserCard(user) {
+  if (!user) return null;
+  if (typeof user !== "object") {
+    return { _id: String(user), name: "", email: "" };
+  }
+  return {
+    _id: user._id ? String(user._id) : undefined,
+    name: user.name || "",
+    email: user.email || "",
   };
 }
 
@@ -88,14 +115,90 @@ export async function listReferralRewardsService({
     filter.status = safeStatus;
   }
 
-  const [items, total] = await Promise.all([
+  const [docs, total] = await Promise.all([
     ReferralReward.find(filter)
+      .populate("referred_user", "name email")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(safeLimit)
       .lean(),
     ReferralReward.countDocuments(filter),
   ]);
+
+  const items = docs.map((doc) => {
+    const referred = toPublicUserCard(doc.referred_user);
+    const amount = Number(doc.reward_amount) || 0;
+    return {
+      _id: doc._id,
+      rewardId: String(doc._id),
+      status: doc.status,
+      reward_amount: amount,
+      amount,
+      rewardAmount: amount,
+      referred_user: doc.referred_user,
+      referredUser: referred,
+      referredUserName: referred?.name || "",
+      referredUserEmail: referred?.email || "",
+      requested_at: doc.requested_at || null,
+      approved_at: doc.approved_at || null,
+      rejected_at: doc.rejected_at || null,
+      requestedAt: doc.requested_at || null,
+      approvedAt: doc.approved_at || null,
+      rejectedAt: doc.rejected_at || null,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt,
+    };
+  });
+
+  return {
+    items,
+    pagination: {
+      page: safePage,
+      limit: safeLimit,
+      total,
+      totalPages: total === 0 ? 0 : Math.ceil(total / safeLimit),
+    },
+  };
+}
+
+/** People this user directly referred (signup via their code). */
+export async function listMyDirectReferralsService({
+  userId,
+  page = 1,
+  limit = 50,
+}) {
+  if (!mongoose.isValidObjectId(userId)) {
+    throw new Error("Invalid userId");
+  }
+
+  const safePage = Math.max(Number(page) || 1, 1);
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const skip = (safePage - 1) * safeLimit;
+
+  const filter = { referred_by: userId };
+
+  const [docs, total] = await Promise.all([
+    Referral.find(filter)
+      .populate("user_id", "name email phone kycStatus isMailVerified")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(safeLimit)
+      .lean(),
+    Referral.countDocuments(filter),
+  ]);
+
+  const items = docs.map((doc) => {
+    const user = toPublicUserCard(doc.user_id);
+    return {
+      userId: user?._id || (doc.user_id ? String(doc.user_id) : null),
+      user,
+      name: user?.name || "",
+      email: user?.email || "",
+      referralCode: doc.referral_code || null,
+      status: doc.status || null,
+      createdAt: doc.createdAt || null,
+    };
+  });
 
   return {
     items,
@@ -225,14 +328,65 @@ export async function adminListReferralRewardsService({
   applyRange("approved_at", approvedFrom, approvedTo, "approved");
   applyRange("rejected_at", rejectedFrom, rejectedTo, "rejected");
 
-  const [items, total] = await Promise.all([
+  const [docs, total] = await Promise.all([
     ReferralReward.find(filter)
+      .populate("referrer_user", "name email phone")
+      .populate("referred_user", "name email phone")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(safeLimit)
       .lean(),
     ReferralReward.countDocuments(filter),
   ]);
+
+  const toUserCard = (user) => {
+    if (!user) return null;
+    if (typeof user !== "object") {
+      return { _id: String(user) };
+    }
+    return {
+      _id: user._id ? String(user._id) : undefined,
+      name: user.name || "",
+      email: user.email || "",
+      phone: user.phone || "",
+    };
+  };
+
+  const items = docs.map((doc) => {
+    const referrerUser = toUserCard(doc.referrer_user);
+    const referredUser = toUserCard(doc.referred_user);
+    const amount = Number(doc.reward_amount) || 0;
+
+    return {
+      _id: doc._id,
+      status: doc.status,
+      reward_amount: amount,
+      amount,
+      rewardAmount: amount,
+      referrer_user: doc.referrer_user,
+      referred_user: doc.referred_user,
+      referrerUser,
+      referredUser,
+      referrer: referrerUser,
+      referred: referredUser,
+      referrerUserId: referrerUser?._id || null,
+      referredUserId: referredUser?._id || null,
+      requested_at: doc.requested_at || null,
+      approved_at: doc.approved_at || null,
+      rejected_at: doc.rejected_at || null,
+      rejection_reason: doc.rejection_reason || "",
+      requestedAt: doc.requested_at || null,
+      approvedAt: doc.approved_at || null,
+      rejectedAt: doc.rejected_at || null,
+      rejectionReason: doc.rejection_reason || "",
+      plan_id: doc.plan_id,
+      deposit_id: doc.deposit_id,
+      referred_account: doc.referred_account,
+      requested_account: doc.requested_account,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt,
+    };
+  });
 
   return {
     items,

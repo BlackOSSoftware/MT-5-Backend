@@ -192,15 +192,22 @@ export async function adminCreateDeposit(req, res) {
   try {
     const { accountId, amount, method, dateTime } = req.body;
     const proof = req.body?.proof;
+    const parsedAmount =
+      typeof amount === "number" ? amount : Number(amount);
+    const ipAddress =
+      req.ip ||
+      req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() ||
+      req.socket?.remoteAddress ||
+      "127.0.0.1";
 
     const deposit = await adminCreateDepositService({
       accountId,
-      amount,
+      amount: parsedAmount,
       method,
       dateTime,
       proof,
       adminId: req.user._id,
-      ipAddress: req.ip
+      ipAddress,
     });
 
     return res.status(201).json({
@@ -209,6 +216,7 @@ export async function adminCreateDeposit(req, res) {
       data: deposit
     });
   } catch (err) {
+    console.error("[ADMIN_DEPOSIT]", err?.message || err);
     return res.status(400).json({
       success: false,
       message: err.message

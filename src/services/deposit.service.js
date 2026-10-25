@@ -724,11 +724,12 @@ export async function adminCreateDepositService({
   ipAddress,
   dateTime,
 }) {
-  if (!accountId || !amount || !method) {
+  if (!accountId || amount === undefined || amount === null || amount === "" || !method) {
     throw new Error("All fields are required");
   }
 
-  if (typeof amount !== "number" || Number.isNaN(amount) || amount <= 0) {
+  const depositAmount = Number(amount);
+  if (!Number.isFinite(depositAmount) || depositAmount <= 0) {
     throw new Error("Invalid deposit amount");
   }
 
@@ -742,12 +743,17 @@ export async function adminCreateDepositService({
   const safeProof = proof && typeof proof === "object"
     ? proof
     : { image_url: "", image_public_id: "" };
+  const safeIp =
+    typeof ipAddress === "string" && ipAddress.trim()
+      ? ipAddress.trim()
+      : "127.0.0.1";
   const importDateTime = parseOptionalDateTime(dateTime, "dateTime");
 
   const session = await mongoose.startSession();
   let createdDeposit = null;
   let engineNewBalance = null;
   let engineBonusBalance = null;
+  let referralMeta = null;
 
   try {
     await session.withTransaction(async () => {
@@ -761,7 +767,7 @@ export async function adminCreateDepositService({
       }
       const isFirstDeposit = account.first_deposit === false;
 
-      const newBalance = Number(account.balance || 0) + Number(amount || 0);
+      const newBalance = Number(account.balance || 0) + depositAmount;
       engineNewBalance = Number(newBalance);
       const currentBonusBalance = Number(account.bonus_balance || 0);
       const newEquity = Number(newBalance) + currentBonusBalance;
@@ -772,7 +778,7 @@ export async function adminCreateDepositService({
           {
             user: account.user_id,
             account: account._id,
-            amount,
+            amount: depositAmount,
             method: normalizedMethod,
             proof: safeProof,
             bonus_percent: 0,
@@ -780,7 +786,7 @@ export async function adminCreateDepositService({
             status: "APPROVED",
             actionBy: adminId,
             actionAt: importDateTime || new Date(),
-            ipAddress,
+            ipAddress: safeIp,
             ...(importDateTime
               ? { createdAt: importDateTime, updatedAt: importDateTime }
               : {}),
@@ -801,31 +807,20 @@ export async function adminCreateDepositService({
         { session },
       );
 
-      // Create referral reward eligibility (one-time) on first approved deposit.
-      if (isFirstDeposit && createdDeposit?.[0]?._id) {
-        await createReferralRewardEligibility({
-          referredUserId: account.user_id,
-          referredAccountId: account._id,
-          planId: account.account_plan_id,
-          depositId: createdDeposit[0]._id,
-          session,
-        });
-      }
-
       await Transaction.create(
         [
           {
             user: account.user_id,
             account: account._id,
             type: "DEPOSIT",
-            amount,
+            amount: depositAmount,
             balanceAfter: newBalance,
             equityAfter: newEquity,
             status: "SUCCESS",
             referenceType: "DEPOSIT",
             referenceId: createdDeposit[0]._id,
             createdBy: adminId,
-            remark: "Transfer from 7141159766",
+            remark: "Admin deposit",
             ...(importDateTime
               ? { createdAt: importDateTime, updatedAt: importDateTime }
               : {}),
@@ -834,6 +829,14 @@ export async function adminCreateDepositService({
         { session },
       );
 
+      if (isFirstDeposit && createdDeposit?.[0]?._id) {
+        referralMeta = {
+          referredUserId: account.user_id,
+          referredAccountId: account._id,
+          planId: account.account_plan_id,
+          depositId: createdDeposit[0]._id,
+        };
+      }
     });
 
     // Sync engine after DB commit
@@ -849,6 +852,17 @@ export async function adminCreateDepositService({
         "[ENGINE_SYNC] updateBalance failed (adminCreateDepositService)",
         e && e.message ? e.message : e,
       );
+    }
+
+    if (referralMeta) {
+      try {
+        await createReferralRewardEligibility(referralMeta);
+      } catch (referralErr) {
+        console.error(
+          "[ADMIN_DEPOSIT] referral eligibility failed:",
+          referralErr?.message || referralErr,
+        );
+      }
     }
 
     return createdDeposit?.[0] || null;
