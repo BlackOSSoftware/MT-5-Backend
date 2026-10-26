@@ -90,14 +90,39 @@ export async function signupService({
   }
 
   try {
-    // 1️⃣ Create user
+    // Resolve broker before create (referral parent → else DEFAULT_BROKER_*)
+    let referredBy = null;
+    let brokerIdForUser = null;
+    const referralCode =
+      typeof referral_code === "string"
+        ? referral_code.trim().toUpperCase()
+        : null;
+    if (referralCode) {
+      const parent = await Referral.findOne(
+        { referral_code: referralCode },
+        { user_id: 1 }
+      );
+      if (parent) {
+        referredBy = parent.user_id;
+        const parentUser = await User.findById(parent.user_id)
+          .select("brokerId")
+          .lean();
+        if (parentUser?.brokerId) brokerIdForUser = parentUser.brokerId;
+      }
+    }
+    if (!brokerIdForUser) {
+      brokerIdForUser = await resolveDefaultBrokerId();
+    }
+
+    // 1️⃣ Create user (brokerId required for admin isolation)
     const user = await User.create({
       email: email.toLowerCase(),
       phone,
       name,
       signup_ip,
       userType: 'USER',
-      isMailVerified: false
+      isMailVerified: false,
+      ...(brokerIdForUser ? { brokerId: brokerIdForUser } : {}),
     });
 
     // 2️⃣ Auth (password)
@@ -114,35 +139,7 @@ export async function signupService({
       )
     });
 
-    // 3️⃣ Referral (+ inherit parent user's broker so they stay under same admin)
-    let referredBy = null;
-    let inheritedBrokerId = null;
-    const referralCode =
-      typeof referral_code === "string"
-        ? referral_code.trim().toUpperCase()
-        : null;
-    if (referralCode) {
-      const parent = await Referral.findOne(
-        { referral_code: referralCode },
-        { user_id: 1 }
-      );
-      if (parent) {
-        referredBy = parent.user_id;
-        const parentUser = await User.findById(parent.user_id)
-          .select("brokerId")
-          .lean();
-        if (parentUser?.brokerId) inheritedBrokerId = parentUser.brokerId;
-      }
-    }
-
-    const defaultBrokerId = inheritedBrokerId || (await resolveDefaultBrokerId());
-    if (defaultBrokerId) {
-      await User.updateOne(
-        { _id: user._id },
-        { $set: { brokerId: defaultBrokerId } },
-      );
-    }
-
+    // 3️⃣ Referral
     await Referral.create({
       user_id: user._id,
       referral_code: generateReferralCode(),
