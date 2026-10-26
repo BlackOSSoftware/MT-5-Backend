@@ -14,6 +14,24 @@ import {
 
 /* ================= SIGNUP ================= */
 
+function hostFromRequest(req) {
+  const fromBody = String(req.body?.portalHost || "").trim();
+  if (fromBody) return fromBody;
+  try {
+    const origin = String(req.headers.origin || "").trim();
+    if (origin) return new URL(origin).hostname;
+  } catch {
+    // ignore
+  }
+  try {
+    const referer = String(req.headers.referer || "").trim();
+    if (referer) return new URL(referer).hostname;
+  } catch {
+    // ignore
+  }
+  return "";
+}
+
 export async function signup(req, res) {
   try {
     const ip =
@@ -23,6 +41,7 @@ export async function signup(req, res) {
 
     const data = await signupService({
       ...req.body,
+      portalHost: hostFromRequest(req),
       signup_ip: ip
     });
 

@@ -26,6 +26,12 @@ const BrokerSchema = new mongoose.Schema(
       primaryColor: { type: String, default: "#0066FF" },
       logoUrl: { type: String, default: "" },
     },
+    // Portal hosts that signup into this broker (e.g. user.fptradess.com)
+    portalHosts: {
+      type: [String],
+      default: [],
+      index: true,
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
