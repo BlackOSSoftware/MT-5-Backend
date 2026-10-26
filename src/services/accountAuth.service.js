@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Account from "../models/Account.model.js";
 import AccountAuth from "../models/AccountAuth.model.js";
 import User from "../models/User.model.js";
@@ -9,6 +10,83 @@ import {
   verifyAccountRefreshToken,
 } from "../utils/jwt.util.js";
 import { sendAccountCreatedMail } from "../utils/mail.util.js";
+import { generateStrongPassword } from "../utils/accountNumber.util.js";
+
+function isObjectIdString(value) {
+  const id = String(value ?? "").trim();
+  if (!id || !mongoose.Types.ObjectId.isValid(id)) return false;
+  return String(new mongoose.Types.ObjectId(id)) === id;
+}
+
+/** Resolve active account by Mongo _id or account_number. */
+async function findActiveAccount(accountId, extraFilter = {}) {
+  const id = String(accountId ?? "").trim();
+  if (!id) return null;
+
+  const or = [{ account_number: id }];
+  if (isObjectIdString(id)) or.unshift({ _id: id });
+
+  return Account.findOne({
+    $or: or,
+    status: "active",
+    ...extraFilter,
+  }).lean();
+}
+
+/**
+ * Find AccountAuth by account_id or account_number.
+ * Heals broken account_id links when found via account_number.
+ */
+async function findAccountAuthForAccount(account, selectFields = "") {
+  if (!account?._id) return null;
+
+  const query = {
+    $or: [
+      { account_id: account._id },
+      { account_number: String(account.account_number) },
+    ],
+  };
+
+  let q = AccountAuth.findOne(query);
+  if (selectFields) q = q.select(selectFields);
+  const auth = await q;
+
+  if (!auth) return null;
+
+  const needsHeal =
+    String(auth.account_id) !== String(account._id) ||
+    String(auth.account_number) !== String(account.account_number);
+
+  if (needsHeal) {
+    await AccountAuth.updateOne(
+      { _id: auth._id },
+      {
+        $set: {
+          account_id: account._id,
+          account_number: account.account_number,
+        },
+      },
+    );
+    auth.account_id = account._id;
+    auth.account_number = account.account_number;
+  }
+
+  return auth;
+}
+
+/** Create missing AccountAuth so reset/login works for orphaned trading accounts. */
+async function createMissingAccountAuth(account, { tradeHash, watchHash }) {
+  return AccountAuth.create({
+    account_id: account._id,
+    account_number: account.account_number,
+    trade_password_hash: tradeHash,
+    watch_password_hash: watchHash,
+    login_attempts: 0,
+    is_locked: false,
+    credentials_created_at: new Date(),
+    credentials_last_reset_at: new Date(),
+  });
+}
 
 /* =====================================================
    ACCOUNT LOGIN (TRADE / WATCH)
@@ -33,12 +111,12 @@ export async function accountLoginService({
     throw new Error("Invalid credentials");
   }
 
-  const auth = await AccountAuth.findOne({
-    account_id: account._id,
-    is_locked: false,
-  }).select("+trade_password_hash +watch_password_hash");
+  const auth = await findAccountAuthForAccount(
+    account,
+    "+trade_password_hash +watch_password_hash",
+  );
 
-  if (!auth) {
+  if (!auth || auth.is_locked) {
     throw new Error("Account auth not found or locked");
   }
 
@@ -248,49 +326,57 @@ export async function resetTradePasswordService({
     throw new Error("Password must be at least 8 characters");
   }
 
-  const account = await Account.findOne({
-    _id: accountId,
-    user_id: userId,
-    status: "active",
-  }).lean();
+  const account = await findActiveAccount(accountId, { user_id: userId });
 
   if (!account) {
     throw new Error("Account not found or inactive");
   }
 
-  const auth = await AccountAuth.findOne({
-    account_id: account._id,
-  }).select("+watch_password_hash");
-
-  if (!auth) {
-    throw new Error("Account auth not found");
-  }
-
-  if (
-    auth.watch_password_hash &&
-    (await comparePassword(newPassword, auth.watch_password_hash))
-  ) {
-    throw new Error("Trade password must be different from watch password");
-  }
-
-  const newPasswordHash = await hashPassword(newPassword);
-
-  await AccountAuth.updateOne(
-    { _id: auth._id },
-    {
-      $set: {
-        trade_password_hash: newPasswordHash,
-        credentials_last_reset_at: new Date(),
-        access_token_hash: null,
-        access_token_expires_at: null,
-        refresh_token_hash: null,
-        refresh_token_expires_at: null,
-        login_attempts: 0,
-      },
-    }
+  let auth = await findAccountAuthForAccount(
+    account,
+    "+watch_password_hash",
   );
 
-  // optional email alert (no password inside)
+  const newPasswordHash = await hashPassword(newPassword);
+  let watchPasswordForMail = "UNCHANGED";
+
+  if (!auth) {
+    let watchPass = generateStrongPassword(12);
+    while (watchPass === newPassword) {
+      watchPass = generateStrongPassword(12);
+    }
+    const watchHash = await hashPassword(watchPass);
+    auth = await createMissingAccountAuth(account, {
+      tradeHash: newPasswordHash,
+      watchHash,
+    });
+    watchPasswordForMail = watchPass;
+  } else {
+    if (
+      auth.watch_password_hash &&
+      (await comparePassword(newPassword, auth.watch_password_hash))
+    ) {
+      throw new Error("Trade password must be different from watch password");
+    }
+
+    await AccountAuth.updateOne(
+      { _id: auth._id },
+      {
+        $set: {
+          trade_password_hash: newPasswordHash,
+          credentials_last_reset_at: new Date(),
+          access_token_hash: null,
+          access_token_expires_at: null,
+          refresh_token_hash: null,
+          refresh_token_expires_at: null,
+          login_attempts: 0,
+          is_locked: false,
+        },
+      },
+    );
+  }
+
+  // optional email alert (no password inside unless auth was bootstrapped)
   const user = await User.findById(userId, { email: 1 }).lean();
   if (user?.email) {
     sendAccountCreatedMail({
@@ -299,7 +385,7 @@ export async function resetTradePasswordService({
       accountType: account.account_type,
       planName: account.plan_name,
       tradePassword: "UPDATED BY USER",
-      watchPassword: "UNCHANGED",
+      watchPassword: watchPasswordForMail,
     }).catch(() => {});
   }
 
@@ -318,49 +404,57 @@ export async function resetWatchPasswordService({
     throw new Error("Password must be at least 8 characters");
   }
 
-  const account = await Account.findOne({
-    _id: accountId,
-    user_id: userId,
-    status: "active",
-  }).lean();
+  const account = await findActiveAccount(accountId, { user_id: userId });
 
   if (!account) {
     throw new Error("Account not found or inactive");
   }
 
-  const auth = await AccountAuth.findOne({
-    account_id: account._id,
-  }).select("+trade_password_hash");
-
-  if (!auth) {
-    throw new Error("Account auth not found");
-  }
-
-  if (
-    auth.trade_password_hash &&
-    (await comparePassword(newPassword, auth.trade_password_hash))
-  ) {
-    throw new Error("Watch password must be different from trade password");
-  }
-
-  const newPasswordHash = await hashPassword(newPassword);
-
-  await AccountAuth.updateOne(
-    { _id: auth._id },
-    {
-      $set: {
-        watch_password_hash: newPasswordHash,
-        credentials_last_reset_at: new Date(),
-        access_token_hash: null,
-        access_token_expires_at: null,
-        refresh_token_hash: null,
-        refresh_token_expires_at: null,
-        login_attempts: 0,
-      },
-    }
+  let auth = await findAccountAuthForAccount(
+    account,
+    "+trade_password_hash",
   );
 
-  // optional email alert (no password inside)
+  const newPasswordHash = await hashPassword(newPassword);
+  let tradePasswordForMail = "UNCHANGED";
+
+  if (!auth) {
+    let tradePass = generateStrongPassword(12);
+    while (tradePass === newPassword) {
+      tradePass = generateStrongPassword(12);
+    }
+    const tradeHash = await hashPassword(tradePass);
+    auth = await createMissingAccountAuth(account, {
+      tradeHash,
+      watchHash: newPasswordHash,
+    });
+    tradePasswordForMail = tradePass;
+  } else {
+    if (
+      auth.trade_password_hash &&
+      (await comparePassword(newPassword, auth.trade_password_hash))
+    ) {
+      throw new Error("Watch password must be different from trade password");
+    }
+
+    await AccountAuth.updateOne(
+      { _id: auth._id },
+      {
+        $set: {
+          watch_password_hash: newPasswordHash,
+          credentials_last_reset_at: new Date(),
+          access_token_hash: null,
+          access_token_expires_at: null,
+          refresh_token_hash: null,
+          refresh_token_expires_at: null,
+          login_attempts: 0,
+          is_locked: false,
+        },
+      },
+    );
+  }
+
+  // optional email alert (no password inside unless auth was bootstrapped)
   const user = await User.findById(userId, { email: 1 }).lean();
   if (user?.email) {
     sendAccountCreatedMail({
@@ -368,7 +462,7 @@ export async function resetWatchPasswordService({
       accountNumber: account.account_number,
       accountType: account.account_type,
       planName: account.plan_name,
-      tradePassword: "UNCHANGED",
+      tradePassword: tradePasswordForMail,
       watchPassword: "UPDATED BY USER",
     }).catch(() => {});
   }
@@ -387,47 +481,56 @@ export async function adminResetTradePasswordService({
     throw new Error("Password must be at least 8 characters");
   }
 
-  const account = await Account.findOne({
-    _id: accountId,
-    status: "active",
-  }).lean();
+  const account = await findActiveAccount(accountId);
 
   if (!account) {
     throw new Error("Account not found or inactive");
   }
 
-  const auth = await AccountAuth.findOne({
-    account_id: account._id,
-  }).select("+watch_password_hash");
-
-  if (!auth) {
-    throw new Error("Account auth not found");
-  }
-
-  // Prevent privilege confusion: WATCH password must never work as TRADE password.
-  if (
-    auth.watch_password_hash &&
-    (await comparePassword(newPassword, auth.watch_password_hash))
-  ) {
-    throw new Error("Trade password must be different from watch password");
-  }
+  let auth = await findAccountAuthForAccount(
+    account,
+    "+watch_password_hash",
+  );
 
   const newPasswordHash = await hashPassword(newPassword);
+  let watchPasswordForMail = "UNCHANGED";
 
-  await AccountAuth.updateOne(
-    { _id: auth._id },
-    {
-      $set: {
-        trade_password_hash: newPasswordHash,
-        credentials_last_reset_at: new Date(),
-        access_token_hash: null,
-        access_token_expires_at: null,
-        refresh_token_hash: null,
-        refresh_token_expires_at: null,
-        login_attempts: 0,
-      },
+  if (!auth) {
+    let watchPass = generateStrongPassword(12);
+    while (watchPass === newPassword) {
+      watchPass = generateStrongPassword(12);
     }
-  );
+    const watchHash = await hashPassword(watchPass);
+    auth = await createMissingAccountAuth(account, {
+      tradeHash: newPasswordHash,
+      watchHash,
+    });
+    watchPasswordForMail = watchPass;
+  } else {
+    // Prevent privilege confusion: WATCH password must never work as TRADE password.
+    if (
+      auth.watch_password_hash &&
+      (await comparePassword(newPassword, auth.watch_password_hash))
+    ) {
+      throw new Error("Trade password must be different from watch password");
+    }
+
+    await AccountAuth.updateOne(
+      { _id: auth._id },
+      {
+        $set: {
+          trade_password_hash: newPasswordHash,
+          credentials_last_reset_at: new Date(),
+          access_token_hash: null,
+          access_token_expires_at: null,
+          refresh_token_hash: null,
+          refresh_token_expires_at: null,
+          login_attempts: 0,
+          is_locked: false,
+        },
+      },
+    );
+  }
 
   const user = await User.findById(account.user_id, { email: 1 }).lean();
   if (user?.email) {
@@ -437,7 +540,7 @@ export async function adminResetTradePasswordService({
       accountType: account.account_type,
       planName: account.plan_name,
       tradePassword: newPassword,
-      watchPassword: "UNCHANGED",
+      watchPassword: watchPasswordForMail,
     }).catch(() => {});
   }
 
@@ -455,47 +558,56 @@ export async function adminResetWatchPasswordService({
     throw new Error("Password must be at least 8 characters");
   }
 
-  const account = await Account.findOne({
-    _id: accountId,
-    status: "active",
-  }).lean();
+  const account = await findActiveAccount(accountId);
 
   if (!account) {
     throw new Error("Account not found or inactive");
   }
 
-  const auth = await AccountAuth.findOne({
-    account_id: account._id,
-  }).select("+trade_password_hash");
-
-  if (!auth) {
-    throw new Error("Account auth not found");
-  }
-
-  // Prevent privilege confusion: TRADE password must never work as WATCH password.
-  if (
-    auth.trade_password_hash &&
-    (await comparePassword(newPassword, auth.trade_password_hash))
-  ) {
-    throw new Error("Watch password must be different from trade password");
-  }
+  let auth = await findAccountAuthForAccount(
+    account,
+    "+trade_password_hash",
+  );
 
   const newPasswordHash = await hashPassword(newPassword);
+  let tradePasswordForMail = "UNCHANGED";
 
-  await AccountAuth.updateOne(
-    { _id: auth._id },
-    {
-      $set: {
-        watch_password_hash: newPasswordHash,
-        credentials_last_reset_at: new Date(),
-        access_token_hash: null,
-        access_token_expires_at: null,
-        refresh_token_hash: null,
-        refresh_token_expires_at: null,
-        login_attempts: 0,
-      },
+  if (!auth) {
+    let tradePass = generateStrongPassword(12);
+    while (tradePass === newPassword) {
+      tradePass = generateStrongPassword(12);
     }
-  );
+    const tradeHash = await hashPassword(tradePass);
+    auth = await createMissingAccountAuth(account, {
+      tradeHash,
+      watchHash: newPasswordHash,
+    });
+    tradePasswordForMail = tradePass;
+  } else {
+    // Prevent privilege confusion: TRADE password must never work as WATCH password.
+    if (
+      auth.trade_password_hash &&
+      (await comparePassword(newPassword, auth.trade_password_hash))
+    ) {
+      throw new Error("Watch password must be different from trade password");
+    }
+
+    await AccountAuth.updateOne(
+      { _id: auth._id },
+      {
+        $set: {
+          watch_password_hash: newPasswordHash,
+          credentials_last_reset_at: new Date(),
+          access_token_hash: null,
+          access_token_expires_at: null,
+          refresh_token_hash: null,
+          refresh_token_expires_at: null,
+          login_attempts: 0,
+          is_locked: false,
+        },
+      },
+    );
+  }
 
   const user = await User.findById(account.user_id, { email: 1 }).lean();
   if (user?.email) {
@@ -504,7 +616,7 @@ export async function adminResetWatchPasswordService({
       accountNumber: account.account_number,
       accountType: account.account_type,
       planName: account.plan_name,
-      tradePassword: "UNCHANGED",
+      tradePassword: tradePasswordForMail,
       watchPassword: newPassword,
     }).catch(() => {});
   }

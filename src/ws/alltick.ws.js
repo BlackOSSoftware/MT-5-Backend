@@ -71,15 +71,24 @@ const normalizeMarket = (v) =>
     .toLowerCase();
 const normalizeFeedMarket = (v) => {
   const market = normalizeMarket(v);
-  // Only crypto symbols use AllTick crypto WS; forex/metal/indices/energy use stock WS.
-  if (market === "crypto") return "crypto";
-  return "stock";
+  // AllTick: equities → quote-stock WS; forex/metal/crypto/indices/energy → quote-b (crypto) WS.
+  // Matches quoteSeed.service feedMarketForSegment (metal/forex seed already uses crypto REST).
+  if (
+    market === "stock" ||
+    market === "stocks" ||
+    market === "equity" ||
+    market === "equities"
+  ) {
+    return "stock";
+  }
+  return "crypto";
 };
 
 const marketsForFeed = (feedMarket) => {
   const feed = normalizeFeedMarket(feedMarket);
-  if (feed === "crypto") return ["crypto"];
-  return ["stock", "forex", "metal", "indices", "energy"];
+  if (feed === "stock") return ["stock"];
+  // Clients may subscribe as metal/forex while upstream is quote-b (crypto).
+  return ["crypto", "forex", "metal", "indices", "energy"];
 };
 const normalizeSymbol = (v) =>
   String(v || "")
@@ -1190,6 +1199,17 @@ async function feedEnginePrice(data) {
 wsCrypto.on("data", (d) => {
   broadcastData("crypto", d);
   feedEnginePrice(d);
+  // AllTick metals use code GOLD; UI often watches XAUUSD — mirror both keys.
+  const code = normalizeSymbol(d?.code || d?.symbol || "");
+  if (code === "GOLD") {
+    broadcastData("crypto", { ...d, code: "XAUUSD" });
+    broadcastData("metal", { ...d, code: "GOLD" });
+    broadcastData("metal", { ...d, code: "XAUUSD" });
+  } else if (code === "XAUUSD") {
+    broadcastData("crypto", { ...d, code: "GOLD" });
+    broadcastData("metal", { ...d, code: "GOLD" });
+    broadcastData("metal", { ...d, code: "XAUUSD" });
+  }
 });
 
 wsStock.on("data", (d) => {

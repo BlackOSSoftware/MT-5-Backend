@@ -44,8 +44,9 @@ export async function changeAccountPasswordService({
   if (!currentPassword) throw new Error("Current master password is required");
   assertStrong(newPassword);
 
+  // Match by ObjectId or string account_id (legacy rows).
   const auth = await AccountAuth.findOne({
-    account_id: accountId,
+    $or: [{ account_id: accountId }, { account_id: String(accountId) }],
     is_locked: false,
   }).select("+trade_password_hash +watch_password_hash");
   if (!auth) throw new Error("Account auth not found or locked");
