@@ -1,5 +1,5 @@
 import UserDevice from '../models/UserDevice.model.js';
-import { adminDeleteUserService, adminGetUserProfileService, adminListUsersService, adminUpdateUserService, getMyProfileService, updateMyProfileService, searchUsersService } from '../services/user.service.js';
+import { adminDeleteUserService, adminGetUserProfileService, adminListUsersService, adminUpdateUserService, getMyProfileService, updateMyProfileService, searchUsersService, healOrphanUsersCreatedByBrokerAdmin } from '../services/user.service.js';
 import {
   attachPresenceFields,
   markUserOffline,
@@ -171,6 +171,11 @@ export async function markPresenceOffline(req, res) {
 
 export async function adminListUsers(req, res) {
   try {
+    // Fix users created earlier without brokerId so they appear under this admin.
+    if (req.brokerId && req.user?._id && !req.isSuperAdmin) {
+      await healOrphanUsersCreatedByBrokerAdmin(req.user._id, req.brokerId);
+    }
+
     const data = await adminListUsersService({
       ...req.query,
       ...(req.brokerId ? { brokerId: req.brokerId } : {}),

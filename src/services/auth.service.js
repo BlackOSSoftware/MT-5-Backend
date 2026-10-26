@@ -19,6 +19,7 @@ import {
 
 // ✅ ADD THESE IMPORTS
 import AccountPlan from '../models/AccountPlan.model.js';
+import Broker from '../models/Broker.model.js';
 import redis from '../config/redis.js';
 import { createAccount } from './account.service.js'; // ✅ adjust path if needed
 
@@ -28,6 +29,20 @@ import { createAccount } from './account.service.js'; // ✅ adjust path if need
  */
 const DEFAULT_DEMO_PLAN_CACHE_KEY = 'default_demo_plan_id';
 const DEFAULT_DEMO_PLAN_CACHE_TTL = 60 * 60 * 6; // 6 hours
+
+/** Portal public signup → white-label broker (FP Trades / BLACKOS, etc.) */
+async function resolveDefaultBrokerId() {
+  const fromId = String(process.env.DEFAULT_BROKER_ID || "").trim();
+  if (fromId && mongoose.isValidObjectId(fromId)) return fromId;
+
+  const fromCode = String(process.env.DEFAULT_BROKER_CODE || "")
+    .trim()
+    .toUpperCase();
+  if (!fromCode) return null;
+
+  const broker = await Broker.findOne({ code: fromCode }).select("_id").lean();
+  return broker?._id ? String(broker._id) : null;
+}
 
 async function getDefaultDemoPlanId() {
   // 1) Redis hit
@@ -99,8 +114,9 @@ export async function signupService({
       )
     });
 
-    // 3️⃣ Referral
+    // 3️⃣ Referral (+ inherit parent user's broker so they stay under same admin)
     let referredBy = null;
+    let inheritedBrokerId = null;
     const referralCode =
       typeof referral_code === "string"
         ? referral_code.trim().toUpperCase()
@@ -110,7 +126,21 @@ export async function signupService({
         { referral_code: referralCode },
         { user_id: 1 }
       );
-      if (parent) referredBy = parent.user_id;
+      if (parent) {
+        referredBy = parent.user_id;
+        const parentUser = await User.findById(parent.user_id)
+          .select("brokerId")
+          .lean();
+        if (parentUser?.brokerId) inheritedBrokerId = parentUser.brokerId;
+      }
+    }
+
+    const defaultBrokerId = inheritedBrokerId || (await resolveDefaultBrokerId());
+    if (defaultBrokerId) {
+      await User.updateOne(
+        { _id: user._id },
+        { $set: { brokerId: defaultBrokerId } },
+      );
     }
 
     await Referral.create({
@@ -530,7 +560,8 @@ export async function adminSignupService({
   kycStatus,
   profile = {},
   actorId = null,
-  userType
+  userType,
+  brokerId = null,
 }) {
   if (!email || typeof email !== 'string') {
     throw new Error('Email is required');
@@ -586,6 +617,15 @@ export async function adminSignupService({
   const finalUserType = 'USER';
   const mailVerified = Boolean(isMailVerified);
 
+  let resolvedBrokerId = null;
+  if (brokerId) {
+    const id = String(brokerId).trim();
+    if (!mongoose.isValidObjectId(id)) {
+      throw new Error('Invalid brokerId');
+    }
+    resolvedBrokerId = id;
+  }
+
   let user = null;
   let verifyToken = null;
 
@@ -597,6 +637,7 @@ export async function adminSignupService({
       signup_ip,
       userType: finalUserType,
       isMailVerified: mailVerified,
+      ...(resolvedBrokerId ? { brokerId: resolvedBrokerId } : {}),
       ...(safeKycStatus ? { kycStatus: safeKycStatus } : {})
     });
 

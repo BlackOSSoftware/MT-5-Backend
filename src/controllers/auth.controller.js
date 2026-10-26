@@ -46,8 +46,24 @@ export async function adminSignup(req, res) {
       req.socket?.remoteAddress ||
       null;
 
+    // Broker Admin: always scope to their broker.
+    // SuperAdmin: optional body.brokerId / x-broker-id to place user under a tenant.
+    const brokerId =
+      req.brokerId ||
+      req.body?.brokerId ||
+      req.user?.brokerId ||
+      null;
+
+    if (!req.isSuperAdmin && !brokerId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Broker scope required to create users',
+      });
+    }
+
     const data = await adminSignupService({
       ...req.body,
+      brokerId,
       signup_ip: ip,
       actorId: req.user?._id || null
     });

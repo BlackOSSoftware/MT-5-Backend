@@ -15,12 +15,14 @@ import {
 } from '../../controllers/auth.controller.js';
 import { authMiddleware } from '../../middlewares/auth.middleware.js';
 import { adminAuth } from '../../middlewares/adminAuth.middleware.js';
+import { brokerAdminAuth } from '../../middlewares/brokerAuth.middleware.js';
 
 const router = express.Router();
 
 // all auth routes prefixed with /api/v1/auth
 router.post('/signup', signup);
-router.post('/admin/signup', authMiddleware, adminAuth, adminSignup);
+// brokerAdminAuth → attaches req.brokerId so created users stay under that admin/broker
+router.post('/admin/signup', brokerAdminAuth, adminSignup);
 router.post('/verify-email', verifyEmail);
 router.post('/resend-verify-email', resendVerifyEmail);
 router.post('/login', login);

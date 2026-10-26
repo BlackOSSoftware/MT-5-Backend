@@ -301,6 +301,38 @@ export async function adminUpdateUserService(userId, payload = {}) {
   }
 }
 
+/**
+ * Users created by a broker admin before brokerId was saved on User
+ * still show only under SuperAdmin. Re-attach them to that admin's broker.
+ */
+export async function healOrphanUsersCreatedByBrokerAdmin(adminId, brokerId) {
+  if (!adminId || !brokerId) return 0;
+  if (!mongoose.isValidObjectId(String(adminId))) return 0;
+  if (!mongoose.isValidObjectId(String(brokerId))) return 0;
+
+  const logs = await ActivityLog.find({
+    action: "USER_CREATED",
+    actor_id: adminId,
+    actor_type: "ADMIN",
+  })
+    .select("user_id")
+    .lean();
+
+  const ids = logs.map((l) => l.user_id).filter(Boolean);
+  if (!ids.length) return 0;
+
+  const result = await User.updateMany(
+    {
+      _id: { $in: ids },
+      userType: "USER",
+      $or: [{ brokerId: null }, { brokerId: { $exists: false } }],
+    },
+    { $set: { brokerId } },
+  );
+
+  return result.modifiedCount || 0;
+}
+
 export async function adminListUsersService(query = {}) {
   const pageRaw = Number(query.page);
   const limitRaw = Number(query.limit);
