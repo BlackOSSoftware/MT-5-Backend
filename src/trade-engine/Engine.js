@@ -7,7 +7,22 @@ import { Position } from "./Position.js";
 import { RiskManager } from "./RiskManager.js";
 import { engineEvents } from "./EngineEvents.js";
 import { ledgerQueue } from "./LedgerQueue.js";
-import { publishPositionClosed } from "./EngineSyncBus.js";
+
+// Lazy publish — avoid Engine ↔ EngineSyncBus ↔ bootstrap circular import crash on boot.
+function fanoutPositionClosed(accountId, positionId, balance, bonusBalance) {
+  setImmediate(() => {
+    import("./EngineSyncBus.js")
+      .then(({ publishPositionClosed }) => {
+        publishPositionClosed(accountId, positionId, balance, bonusBalance);
+      })
+      .catch((err) => {
+        console.error(
+          "[ENGINE] publishPositionClosed failed",
+          err?.message || err,
+        );
+      });
+  });
+}
 
 const DEBUG_LIVE = true;
 
@@ -1532,16 +1547,12 @@ export class Engine {
     };
 
     // Tell other workers immediately — do not wait for ledger (prevents double-close).
-    try {
-      publishPositionClosed(
-        account.accountId,
-        pos.positionId,
-        Number(account.balance.toFixed(2)),
-        Number(account.bonus_balance || 0),
-      );
-    } catch (err) {
-      console.error("[ENGINE] publishPositionClosed failed", err);
-    }
+    fanoutPositionClosed(
+      account.accountId,
+      pos.positionId,
+      Number(account.balance.toFixed(2)),
+      Number(account.bonus_balance || 0),
+    );
 
     // Emit account & position removal (position removed so send minimal info)
     try {
