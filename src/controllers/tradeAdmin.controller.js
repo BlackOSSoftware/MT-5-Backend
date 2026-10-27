@@ -824,18 +824,18 @@ export const adminClosePosition = async (req, res) => {
       ip
     );
 
-    const accountId = String(account._id);
+    const resolvedAccountId = String(account._id);
     const posId = String(resolvedPositionId);
 
     const existing = await Trade.findOne({
-      accountId,
+      accountId: resolvedAccountId,
       positionId: posId,
     })
       .select("status realizedPnL ticket closeTicket")
       .lean();
 
     if (existing && (existing.status === "CLOSED" || existing.status === "CLOSING")) {
-      const eng = tradeEngine.accounts.get(accountId);
+      const eng = tradeEngine.accounts.get(resolvedAccountId);
       if (eng?.positions?.has?.(posId)) {
         eng.positions.delete(posId);
         try {
@@ -857,12 +857,12 @@ export const adminClosePosition = async (req, res) => {
     }
 
     await Trade.findOneAndUpdate(
-      { accountId, positionId: posId, status: "OPEN" },
+      { accountId: resolvedAccountId, positionId: posId, status: "OPEN" },
       { $set: { status: "CLOSING", closeReason: "MANUAL" } },
     );
 
     const result = await tradeEngine.squareOffPosition({
-      accountId,
+      accountId: resolvedAccountId,
       positionId: posId,
       reason: "MANUAL",
       closeTicket: await nextOrderTicket(),
