@@ -148,9 +148,13 @@ export async function createAccount({
 
   /* ================= CREATE ================= */
 
+  const owner = await User.findById(userId).select("brokerId").lean();
+  const ownerBrokerId = owner?.brokerId || null;
+
   const account = await Account.create({
     user_id: userId,
     account_plan_id: plan._id,
+    ...(ownerBrokerId ? { brokerId: ownerBrokerId } : {}),
 
     account_number: accountNumber,
     account_type,

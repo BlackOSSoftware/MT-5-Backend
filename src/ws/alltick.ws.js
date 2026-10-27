@@ -345,25 +345,25 @@ function findSymbolInEngine(symbol) {
   return null;
 }
 
-// attempt to load account into engine memory (subscribe-time)
-async function ensureEngineAccount(accountId) {
+// Load/refresh account into engine memory from DB (always refresh on identify).
+async function ensureEngineAccount(accountId, { forceRefresh = false } = {}) {
   if (!accountId || !tradeEngine) return null;
   const id = String(accountId);
   let acc = tradeEngine.accounts && tradeEngine.accounts.get(id);
-  if (acc) return acc;
+  if (acc && !forceRefresh) return acc;
 
   try {
-    await EngineSync.syncAccount(id);
-    acc = tradeEngine.accounts && tradeEngine.accounts.get(id);
+    acc = await EngineSync.refreshAccountForLive(id);
     INFO(
-      "ensureEngineAccount: synced account into engine",
+      "ensureEngineAccount: refreshed account into engine",
       id,
       acc ? "OK" : "FAILED",
+      forceRefresh ? "force" : "miss",
     );
     return acc || null;
   } catch (err) {
     DBG(
-      "ensureEngineAccount syncAccount threw",
+      "ensureEngineAccount refresh threw",
       err && err.message ? err.message : err,
     );
     return null;
@@ -1482,13 +1482,11 @@ export async function handleClientMessage(clientWs, msg) {
       const accountId = String(data.accountId);
       clientWs.accountId = accountId;
 
-      // set engine account reference (try load if missing)
-      let acc = tradeEngine.accounts && tradeEngine.accounts.get(accountId);
-      if (!acc) {
-        try {
-          acc = await ensureEngineAccount(accountId);
-        } catch {}
-      }
+      // Always refresh from DB so deposits/trades show on web even if engine RAM was stale.
+      let acc = null;
+      try {
+        acc = await ensureEngineAccount(accountId, { forceRefresh: true });
+      } catch {}
       clientWs.engineAccount = acc || null;
 
       ensureAccountSet(accountId);

@@ -10,6 +10,13 @@ import { getEffectiveBonusPercentForAccount } from "./bonus.service.js";
 import {
   getWithdrawableBalance,
 } from "../utils/nonWithdrawable.util.js";
+import {
+  applyBrokerUserIdMatch,
+  getUserBrokerId,
+  healDocBrokerIdsFromUsers,
+  assertUserBelongsToBroker,
+} from "../utils/brokerScope.js";
+import { healNullBrokerUsersToDefaultBroker } from "./user.service.js";
 
 /* -------------------- HELPERS -------------------- */
 
@@ -60,10 +67,6 @@ const buildFilter = ({ userId, query, isAdmin }) => {
 
   if (query.method && typeof query.method === "string") {
     filter.method = query.method;
-  }
-
-  if (query.brokerId) {
-    filter.brokerId = query.brokerId;
   }
 
   const { from, to } = parseDateRange(query);
@@ -246,6 +249,7 @@ export const adminCreateWithdrawal = async ({
       /* =========================
          CREATE WITHDRAWAL
       ========================== */
+      const stampBrokerId = await getUserBrokerId(account.user_id);
       const withdrawalDocs = await Withdrawal.create(
         [
           {
@@ -269,6 +273,7 @@ export const adminCreateWithdrawal = async ({
             ipAddress: ipAddress || "",
             bonus_percent: Number(bonusPercent || 0),
             bonus_deducted: Number(bonusDeduct || 0),
+            ...(stampBrokerId ? { brokerId: stampBrokerId } : {}),
             ...(importDateTime
               ? { createdAt: importDateTime, updatedAt: importDateTime }
               : {}),
@@ -517,6 +522,7 @@ export const createWithdrawal = async ({ userId, ipAddress, payload }) => {
       /* =========================
          CREATE WITHDRAWAL
       ========================== */
+      const stampBrokerId = await getUserBrokerId(userId);
       const withdrawalDocs = await Withdrawal.create(
         [
           {
@@ -538,6 +544,7 @@ export const createWithdrawal = async ({ userId, ipAddress, payload }) => {
             ipAddress: ipAddress || "",
             bonus_percent: Number(bonusPercent || 0),
             bonus_deducted: Number(bonusDeduct || 0),
+            ...(stampBrokerId ? { brokerId: stampBrokerId } : {}),
           },
         ],
         { session },
@@ -670,7 +677,20 @@ export const listUserWithdrawals = async ({ userId, query }) => {
 export const listAdminWithdrawals = async ({ query }) => {
   const { page, limit, skip } = parsePagination(query);
 
+  if (query.brokerId) {
+    try {
+      await healNullBrokerUsersToDefaultBroker(query.brokerId);
+      await healDocBrokerIdsFromUsers(Withdrawal, "user");
+    } catch {
+      /* non-fatal */
+    }
+  }
+
   const filter = buildFilter({ userId: null, query, isAdmin: true });
+  // Broker admin: users of this broker OR stamped withdrawal.brokerId.
+  if (query.brokerId) {
+    await applyBrokerUserIdMatch(filter, query.brokerId, "user");
+  }
 
   const sortBy = typeof query.sortBy === "string" ? query.sortBy : "createdAt";
   const sortDir = query.sortDir === "asc" ? 1 : -1;
@@ -714,6 +734,14 @@ export const adminSearchWithdrawals = async ({ query }) => {
     const { page, limit, skip } = parsePagination(query);
 
     const match = {};
+
+    if (query.brokerId) {
+      try {
+        await healDocBrokerIdsFromUsers(Withdrawal, "user");
+      } catch {
+        /* non-fatal */
+      }
+    }
 
     const userIdRaw = String(query.userId ?? query.user ?? "").trim();
     if (userIdRaw) {
@@ -793,6 +821,10 @@ export const adminSearchWithdrawals = async ({ query }) => {
       match.createdAt = {};
       if (fromValid) match.createdAt.$gte = from;
       if (toValid) match.createdAt.$lte = to;
+    }
+
+    if (query.brokerId) {
+      await applyBrokerUserIdMatch(match, query.brokerId, "user");
     }
 
     const sortByRaw =
@@ -928,7 +960,11 @@ export const adminSearchWithdrawals = async ({ query }) => {
  * ✅ ONLY HOLD_BALANCE WILL DECREASE
  * ✅ BALANCE ALREADY DEDUCTED AT REQUEST TIME
  */
-export const adminApproveWithdrawal = async ({ adminId, withdrawalId }) => {
+export const adminApproveWithdrawal = async ({
+  adminId,
+  withdrawalId,
+  brokerId = null,
+}) => {
   const session = await mongoose.startSession();
 
   try {
@@ -948,6 +984,15 @@ export const adminApproveWithdrawal = async ({ adminId, withdrawalId }) => {
 
       if (withdrawal.status !== "PENDING") {
         throw new Error("Only pending withdrawals can be approved");
+      }
+
+      if (brokerId) {
+        const stampedOk =
+          withdrawal.brokerId &&
+          String(withdrawal.brokerId) === String(brokerId);
+        if (!stampedOk) {
+          await assertUserBelongsToBroker(withdrawal.user, brokerId);
+        }
       }
 
       const account = await Account.findOne({
@@ -1052,6 +1097,7 @@ export const adminRejectWithdrawal = async ({
   adminId,
   withdrawalId,
   rejectionReason,
+  brokerId = null,
 }) => {
   const session = await mongoose.startSession();
   let engineAccountId = null;
@@ -1080,6 +1126,15 @@ export const adminRejectWithdrawal = async ({
 
       if (withdrawal.status !== "PENDING") {
         throw new Error("Only pending withdrawals can be rejected");
+      }
+
+      if (brokerId) {
+        const stampedOk =
+          withdrawal.brokerId &&
+          String(withdrawal.brokerId) === String(brokerId);
+        if (!stampedOk) {
+          await assertUserBelongsToBroker(withdrawal.user, brokerId);
+        }
       }
 
       const account = await Account.findOne({

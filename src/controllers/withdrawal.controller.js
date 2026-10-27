@@ -50,7 +50,10 @@ export const listAdminWithdrawalsController = async (req, res) => {
 
 export const adminSearchWithdrawalsController = async (req, res) => {
   const result = await adminSearchWithdrawals({
-    query: req.query
+    query: {
+      ...req.query,
+      ...(req.brokerId ? { brokerId: req.brokerId } : {}),
+    },
   });
 
   return res.status(result.statusCode).json({
@@ -62,8 +65,9 @@ export const adminSearchWithdrawalsController = async (req, res) => {
 
 export const adminApproveWithdrawalController = async (req, res) => {
   const result = await adminApproveWithdrawal({
-    adminId: req._id,
+    adminId: req.user?._id,
     withdrawalId: req.params.withdrawalId,
+    brokerId: req.brokerId || null,
   });
 
   return res.status(result.statusCode).json({
@@ -77,9 +81,10 @@ export const adminRejectWithdrawalController = async (req, res) => {
   const { rejectionReason } = req.body;
 
   const result = await adminRejectWithdrawal({
-    adminId: req._id,
+    adminId: req.user?._id,
     withdrawalId: req.params.withdrawalId,
     rejectionReason,
+    brokerId: req.brokerId || null,
   });
 
   return res.status(result.statusCode).json({

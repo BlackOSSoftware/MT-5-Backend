@@ -3,6 +3,8 @@
 import { tradeEngine } from "./bootstrap.js";
 import AccountModel from "../models/Account.model.js";
 import InstrumentModel from "../models/Instrument.model.js";
+import Trade from "../models/Trade.model.js";
+import PendingOrder from "../models/PendingOrder.model.js";
 
 /**
  * EngineSync
@@ -66,6 +68,65 @@ class EngineSync {
       spread: account.spread_enabled,
       status: account.status,
     });
+  }
+
+  /**
+   * Force-refresh account money + restore any OPEN positions / PENDING orders
+   * that are in DB but missing from engine RAM (common after deposit or restart races).
+   */
+  static async refreshAccountForLive(accountId) {
+    const id = String(accountId || "");
+    if (!id) return null;
+
+    await this.syncAccount(id);
+    const acc = tradeEngine.accounts.get(id);
+    if (!acc) return null;
+
+    const [openTrades, pendingOrders] = await Promise.all([
+      Trade.find({
+        accountId: id,
+        status: "OPEN",
+        isDeleted: { $ne: true },
+      }).lean(),
+      PendingOrder.find({
+        accountId: id,
+        status: "PENDING",
+        isDeleted: { $ne: true },
+      }).lean(),
+    ]);
+
+    for (const trade of openTrades) {
+      const posId = String(trade.positionId || "");
+      if (!posId) continue;
+      if (acc.positions?.has?.(posId)) continue;
+      try {
+        tradeEngine.loadOpenPosition(trade);
+      } catch (err) {
+        console.warn(
+          "[ENGINE_SYNC] loadOpenPosition failed",
+          posId,
+          err?.message || err,
+        );
+      }
+    }
+
+    for (const order of pendingOrders) {
+      const orderId = String(order.orderId || order._id || "");
+      if (!orderId) continue;
+      if (acc.pendingOrders?.has?.(orderId)) continue;
+      try {
+        tradeEngine.loadPendingOrder(order);
+      } catch (err) {
+        console.warn(
+          "[ENGINE_SYNC] loadPendingOrder failed",
+          orderId,
+          err?.message || err,
+        );
+      }
+    }
+
+    acc.recalc?.();
+    return acc;
   }
 
   /* ===========================

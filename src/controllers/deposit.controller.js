@@ -134,14 +134,18 @@ export async function adminSearchDeposits(req, res) {
 /* ADMIN: APPROVE */
 export async function adminApproveDeposit(req, res) {
   try {
-    const data = await approveDepositService(req.params.id, req.user.id);
+    const data = await approveDepositService(
+      req.params.id,
+      req.user.id,
+      req.brokerId || null,
+    );
     return res.json({
       success: true,
       message: 'Deposit approved',
       data
     });
   } catch (err) {
-    return res.status(400).json({ success: false, message: err.message });
+    return res.status(err.status || 400).json({ success: false, message: err.message });
   }
 }
 
@@ -153,7 +157,8 @@ export async function adminRejectDeposit(req, res) {
     const data = await rejectDepositService(
       req.params.id,
       req.user.id,
-      rejectionReason
+      rejectionReason,
+      req.brokerId || null,
     );
 
     return res.json({

@@ -333,6 +333,28 @@ export async function healOrphanUsersCreatedByBrokerAdmin(adminId, brokerId) {
   return result.modifiedCount || 0;
 }
 
+/**
+ * Portal signups that missed brokerId still show only under SuperAdmin.
+ * Attach those USER orphans to the platform DEFAULT_BROKER_ID only
+ * (fptrade / BLACKOS) — never claim orphans for a non-default broker.
+ */
+export async function healNullBrokerUsersToDefaultBroker(brokerId) {
+  if (!brokerId) return 0;
+  const defaultId = String(process.env.DEFAULT_BROKER_ID || "").trim();
+  if (!defaultId || String(brokerId) !== defaultId) return 0;
+  if (!mongoose.isValidObjectId(defaultId)) return 0;
+
+  const result = await User.updateMany(
+    {
+      userType: "USER",
+      $or: [{ brokerId: null }, { brokerId: { $exists: false } }],
+    },
+    { $set: { brokerId: defaultId } },
+  );
+
+  return result.modifiedCount || 0;
+}
+
 export async function adminListUsersService(query = {}) {
   const pageRaw = Number(query.page);
   const limitRaw = Number(query.limit);

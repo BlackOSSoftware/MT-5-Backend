@@ -10,6 +10,7 @@ import {
   nextDealTicket,
   nextOrderTicket,
 } from "../services/orderTicket.service.js";
+import { getUserBrokerId } from "../utils/brokerScope.js";
 
 class LedgerQueue {
   constructor() {
@@ -143,10 +144,13 @@ class LedgerQueue {
       throw new Error("Ledger tradeOpen: marginUsed missing");
     }
 
+    const stampBrokerId = await getUserBrokerId(resolvedUserId);
+
     const trade = await Trade.create({
       userId: resolvedUserId,
       accountId,
       ipAddress: ipAddress || "SYSTEM",
+      ...(stampBrokerId ? { brokerId: stampBrokerId } : {}),
 
       positionId,
       ticket,
@@ -398,6 +402,7 @@ class LedgerQueue {
   ========================= */
 
   async pendingCreate(order) {
+    const stampBrokerId = await getUserBrokerId(order.userId);
     await PendingOrder.create({
       orderId: order.orderId,
       ticket: order.ticket,
@@ -415,6 +420,7 @@ class LedgerQueue {
       expireAt: order.expireAt ? new Date(order.expireAt) : null,
       status: "PENDING",
       createdAt: new Date(order.createdAt),
+      ...(stampBrokerId ? { brokerId: stampBrokerId } : {}),
     });
 
     console.log("[LEDGER][PENDING_CREATE][OK]", order.orderId);

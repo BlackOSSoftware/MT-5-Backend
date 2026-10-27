@@ -11,6 +11,13 @@ import redis from "../config/redis.js";
 import EngineSync from "../trade-engine/EngineSync.js";
 import { publishAccountBalance } from "../trade-engine/EngineSyncBus.js";
 import { createReferralRewardEligibility } from "./referral.service.js";
+import {
+  applyBrokerUserIdMatch,
+  getUserBrokerId,
+  healDocBrokerIdsFromUsers,
+  assertUserBelongsToBroker,
+} from "../utils/brokerScope.js";
+import { healNullBrokerUsersToDefaultBroker } from "./user.service.js";
 
 const DEPOSIT_METHODS = new Set([
   "UPI",
@@ -145,6 +152,11 @@ export async function createDepositService({
     );
   }
 
+  let stampBrokerId = await getUserBrokerId(userId);
+  if (!stampBrokerId) {
+    stampBrokerId = userAccount.brokerId || null;
+  }
+
   const deposit = await Deposit.create({
     user: userId,
     account,
@@ -152,7 +164,16 @@ export async function createDepositService({
     method: normalizedMethod,
     proof,
     ipAddress,
+    ...(stampBrokerId ? { brokerId: stampBrokerId } : {}),
   });
+
+  // Keep list caches fresh for broker admins.
+  try {
+    const keys = await redis.keys("admin:deposits:*");
+    if (keys.length) await redis.del(...keys);
+  } catch {
+    /* non-fatal */
+  }
 
   return deposit;
 }
@@ -263,14 +284,27 @@ export async function getDepositStatusService(userId, depositId) {
 
 /* ADMIN GET ALL */
 export async function adminGetAllDepositsService({ page, limit, filters }) {
+  // Heal orphan users + deposits so broker admins see their users' rows.
+  if (filters?.brokerId) {
+    try {
+      await healNullBrokerUsersToDefaultBroker(filters.brokerId);
+      await healDocBrokerIdsFromUsers(Deposit, "user");
+      const keys = await redis.keys("admin:deposits:*");
+      if (keys.length) await redis.del(...keys);
+    } catch {
+      /* non-fatal */
+    }
+  }
+
   const query = {};
 
   if (filters?.status) {
     query.status = filters.status;
   }
 
+  // Scope by broker's users OR stamped deposit.brokerId (legacy-safe).
   if (filters?.brokerId) {
-    query.brokerId = filters.brokerId;
+    await applyBrokerUserIdMatch(query, filters.brokerId, "user");
   }
 
   if (filters?.fromDate || filters?.toDate) {
@@ -285,10 +319,14 @@ export async function adminGetAllDepositsService({ page, limit, filters }) {
 
   const skip = (page - 1) * limit;
 
-  /* 🔴 REDIS CACHE KEY */
-  const cacheKey = `admin:deposits:${page}:${limit}:${JSON.stringify(filters)}`;
+  /* 🔴 REDIS CACHE KEY — include brokerId so SuperAdmin cache never leaks to broker admin */
+  const cacheKey = `admin:deposits:${String(filters?.brokerId || "all")}:${page}:${limit}:${JSON.stringify({
+    status: filters?.status || null,
+    fromDate: filters?.fromDate || null,
+    toDate: filters?.toDate || null,
+  })}`;
 
-  /* 🔴 TRY CACHE FIRST */
+  /* 🔴 TRY CACHE FIRST (skip stale empty broker caches by short TTL below) */
   const cached = await redis.get(cacheKey);
   if (cached) {
     return JSON.parse(cached);
@@ -315,8 +353,8 @@ export async function adminGetAllDepositsService({ page, limit, filters }) {
 
   const result = { records, total };
 
-  /* 🔴 SAVE TO REDIS (60 sec) */
-  await redis.setex(cacheKey, 60, JSON.stringify(result));
+  /* 🔴 SAVE TO REDIS (15 sec — broker heal/stamp must show quickly) */
+  await redis.setex(cacheKey, 15, JSON.stringify(result));
 
   return result;
 }
@@ -340,7 +378,14 @@ export async function adminSearchDepositsService(query = {}) {
   const match = {};
 
   if (query.brokerId) {
-    match.brokerId = query.brokerId;
+    try {
+      await healNullBrokerUsersToDefaultBroker(query.brokerId);
+      await healDocBrokerIdsFromUsers(Deposit, "user");
+      const keys = await redis.keys("admin:deposits:*");
+      if (keys.length) await redis.del(...keys);
+    } catch {
+      /* non-fatal */
+    }
   }
 
   const statusRaw =
@@ -377,6 +422,11 @@ export async function adminSearchDepositsService(query = {}) {
       throw new Error("Invalid accountId");
     }
     match.account = new mongoose.Types.ObjectId(accountIdRaw);
+  }
+
+  // Apply after userId so ownership check can reject cross-broker ids.
+  if (query.brokerId) {
+    await applyBrokerUserIdMatch(match, query.brokerId, "user");
   }
 
   const fromRaw = String(
@@ -515,7 +565,7 @@ export async function adminSearchDepositsService(query = {}) {
 /* =========================
    ADMIN APPROVE DEPOSIT
 ========================== */
-export async function approveDepositService(depositId, adminId) {
+export async function approveDepositService(depositId, adminId, brokerId = null) {
   const session = await mongoose.startSession();
   let engineAccountId = null;
   let engineNewBalance = null;
@@ -533,6 +583,15 @@ export async function approveDepositService(depositId, adminId) {
 
       if (!deposit) {
         throw new Error("Deposit not found or already processed");
+      }
+
+      if (brokerId) {
+        const stampedOk =
+          deposit.brokerId &&
+          String(deposit.brokerId) === String(brokerId);
+        if (!stampedOk) {
+          await assertUserBelongsToBroker(deposit.user, brokerId);
+        }
       }
 
       /* =========================
@@ -657,7 +716,12 @@ export async function approveDepositService(depositId, adminId) {
 }
 
 /* ADMIN REJECT */
-export async function rejectDepositService(depositId, adminId, reason) {
+export async function rejectDepositService(
+  depositId,
+  adminId,
+  reason,
+  brokerId = null,
+) {
   if (!reason) throw new Error("Rejection reason required");
 
   const deposit = await Deposit.findById(depositId);
@@ -665,6 +729,14 @@ export async function rejectDepositService(depositId, adminId, reason) {
 
   if (deposit.status !== "PENDING") {
     throw new Error("Action already processed by admin");
+  }
+
+  if (brokerId) {
+    const stampedOk =
+      deposit.brokerId && String(deposit.brokerId) === String(brokerId);
+    if (!stampedOk) {
+      await assertUserBelongsToBroker(deposit.user, brokerId);
+    }
   }
 
   deposit.status = "REJECTED";
@@ -781,6 +853,7 @@ export async function adminCreateDepositService({
       const newEquity = Number(newBalance) + currentBonusBalance;
       engineBonusBalance = currentBonusBalance;
 
+      const stampBrokerId = await getUserBrokerId(account.user_id);
       createdDeposit = await Deposit.create(
         [
           {
@@ -795,6 +868,7 @@ export async function adminCreateDepositService({
             actionBy: adminId,
             actionAt: importDateTime || new Date(),
             ipAddress: safeIp,
+            ...(stampBrokerId ? { brokerId: stampBrokerId } : {}),
             ...(importDateTime
               ? { createdAt: importDateTime, updatedAt: importDateTime }
               : {}),
