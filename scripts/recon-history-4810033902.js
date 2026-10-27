@@ -119,9 +119,9 @@ function buildDayTrades(dateStr, profit, loss, ticketBase) {
       openTime,
       closeTime,
       ticket,
-      closeTicket: ticket + 500000,
-      openDealTicket: ticket + 1000000,
-      closeDealTicket: ticket + 1500000,
+      closeTicket: ticket + 400000,
+      openDealTicket: ticket + 800000,
+      closeDealTicket: ticket + 1200000,
       marginUsed,
       seq,
     });
@@ -315,7 +315,8 @@ async function main() {
 
   let balance = 0;
   let bonus = 0;
-  let ticketBase = 4810030000;
+  // Keep tickets under Int32 max (2147483647) — mobile apps often parse as 32-bit int.
+  let ticketBase = 1820000000;
   const summary = [];
 
   for (const day of LEDGER) {
@@ -436,10 +437,10 @@ async function main() {
         brokerId,
         ipAddress: "127.0.0.1",
         positionId,
-        ticket: t.ticket,
-        closeTicket: t.closeTicket,
-        openDealTicket: t.openDealTicket,
-        closeDealTicket: t.closeDealTicket,
+      ticket: t.ticket,
+      closeTicket: t.ticket + 400000,
+      openDealTicket: t.ticket + 800000,
+      closeDealTicket: t.ticket + 1200000,
         symbol: SYMBOL,
         side: t.side,
         orderType: "MARKET",
