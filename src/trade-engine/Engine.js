@@ -760,6 +760,13 @@ export class Engine {
         ),
         usedMargin: Number(account.usedMargin.toFixed(2)),
         freeMargin: Number(account.freeMargin.toFixed(2)),
+        marginLevel: Number(
+          (
+            account.usedMargin > 0
+              ? (account.equity / account.usedMargin) * 100
+              : 0
+          ).toFixed(2),
+        ),
       });
     } catch (err) {
       console.error("[ENGINE] emit LIVE_ACCOUNT failed", err);
@@ -1456,6 +1463,13 @@ export class Engine {
           ),
           usedMargin: Number(account.usedMargin.toFixed(2)),
           freeMargin: Number(account.freeMargin.toFixed(2)),
+          marginLevel: Number(
+            (
+              account.usedMargin > 0
+                ? (account.equity / account.usedMargin) * 100
+                : 0
+            ).toFixed(2),
+          ),
         });
       } catch (err) {
         console.error("[ENGINE] emit LIVE_ACCOUNT failed", err);
@@ -1590,6 +1604,13 @@ export class Engine {
         ),
         usedMargin: Number(account.usedMargin.toFixed(2)),
         freeMargin: Number(account.freeMargin.toFixed(2)),
+        marginLevel: Number(
+          (
+            account.usedMargin > 0
+              ? (account.equity / account.usedMargin) * 100
+              : 0
+          ).toFixed(2),
+        ),
       });
     } catch (err) {
       console.error("[ENGINE] emit LIVE_ACCOUNT failed (closePosition)", err);

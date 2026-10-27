@@ -1626,6 +1626,13 @@ export async function handleClientMessage(clientWs, msg) {
             ),
             usedMargin: Number(account.usedMargin?.toFixed ? account.usedMargin.toFixed(2) : account.usedMargin),
             freeMargin: Number(account.freeMargin?.toFixed ? account.freeMargin.toFixed(2) : account.freeMargin),
+            marginLevel: Number(
+              (
+                Number(account.usedMargin) > 0
+                  ? (Number(account.equity) / Number(account.usedMargin)) * 100
+                  : 0
+              ).toFixed(2),
+            ),
           };
           clientWs.send(JSON.stringify({ type: "live_account", data: accPayload }));
           DBG("sent account snapshot to", clientWs.clientId, accPayload);
