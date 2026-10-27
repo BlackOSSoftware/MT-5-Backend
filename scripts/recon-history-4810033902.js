@@ -461,7 +461,7 @@ async function main() {
         realizedPnL: realized,
         openTime: t.openTime,
         closeTime: t.closeTime,
-        closeReason: "MANUAL",
+        closeReason: "MANUAL_CLOSE",
         engineVersion: "ENGINE_V1",
         metadata: {
           source: "HISTORICAL_SIMULATION",

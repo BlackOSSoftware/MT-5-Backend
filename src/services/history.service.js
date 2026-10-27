@@ -132,8 +132,8 @@ export async function getOrdersService({
             ? "REJECTED"
             : "CANCELED";
     orders.push({
-      orderId: p.ticket,
-      ticket: p.ticket,
+      orderId: p.ticket != null ? String(p.ticket) : null,
+      ticket: p.ticket != null ? String(p.ticket) : null,
       symbol: p.symbol,
       side: p.side,
       orderType: p.orderType,
@@ -154,9 +154,9 @@ export async function getOrdersService({
     // Executed pending ka open order upar pending record se aa chuka.
     if (!pendingTickets.has(t.ticket) && inRange(t.openTime, range)) {
       orders.push({
-        orderId: t.ticket,
-        ticket: t.ticket,
-        positionId: t.ticket,
+        orderId: t.ticket != null ? String(t.ticket) : null,
+        ticket: t.ticket != null ? String(t.ticket) : null,
+        positionId: t.positionId != null ? String(t.positionId) : String(t.ticket),
         symbol: t.symbol,
         side: t.side,
         orderType: "MARKET",
@@ -173,10 +173,11 @@ export async function getOrdersService({
       });
     }
     if (t.status === "CLOSED" && t.closeTime && inRange(t.closeTime, range)) {
+      const closeTicket = t.closeTicket ?? t.ticket;
       orders.push({
-        orderId: t.closeTicket ?? null,
-        ticket: t.closeTicket ?? null,
-        positionId: t.ticket,
+        orderId: closeTicket != null ? String(closeTicket) : null,
+        ticket: closeTicket != null ? String(closeTicket) : null,
+        positionId: t.positionId != null ? String(t.positionId) : String(t.ticket),
         symbol: t.symbol,
         side: t.side === "BUY" ? "SELL" : "BUY",
         orderType: "MARKET",
@@ -252,13 +253,14 @@ export async function getDealsService({
     if (inRange(t.openTime, range)) {
       const commission = Number(t.commission) || 0;
       totalCommission += commission;
+      const openDeal = t.openDealTicket ?? t.ticket;
       deals.push({
         time: t.openTime,
         date: t.openTime,
-        deal: t.openDealTicket ?? null,
-        order: t.ticket,
-        positionId: t.ticket,
-        tradeId: t.ticket,
+        deal: openDeal != null ? String(openDeal) : null,
+        order: t.ticket != null ? String(t.ticket) : null,
+        positionId: t.positionId != null ? String(t.positionId) : String(t.ticket),
+        tradeId: t.ticket != null ? String(t.ticket) : null,
         symbol: t.symbol,
         type: t.side === "BUY" ? "BUY_IN" : "SELL_IN",
         direction: "in",
@@ -279,13 +281,15 @@ export async function getDealsService({
       const swap = Number(t.swap) || 0;
       totalTradingProfit += profit;
       totalSwap += swap;
+      const closeDeal = t.closeDealTicket ?? t.closeTicket ?? t.ticket;
+      const closeOrder = t.closeTicket ?? t.ticket;
       deals.push({
         time: t.closeTime,
         date: t.closeTime,
-        deal: t.closeDealTicket ?? null,
-        order: t.closeTicket ?? t.ticket,
-        positionId: t.ticket,
-        tradeId: t.ticket,
+        deal: closeDeal != null ? String(closeDeal) : null,
+        order: closeOrder != null ? String(closeOrder) : null,
+        positionId: t.positionId != null ? String(t.positionId) : String(t.ticket),
+        tradeId: t.ticket != null ? String(t.ticket) : null,
         symbol: t.symbol,
         type: t.side === "BUY" ? "SELL_OUT" : "BUY_OUT",
         direction: "out",
@@ -297,7 +301,7 @@ export async function getDealsService({
         pnl: profit,
         profit,
         balance: null,
-        closeReason: t.closeReason,
+        closeReason: t.closeReason === "MANUAL" ? "MANUAL_CLOSE" : t.closeReason,
         comment: closeComment(t),
       });
     }

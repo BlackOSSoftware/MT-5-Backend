@@ -386,10 +386,16 @@ export async function getPositionsService({
     profitLoss =
       profitLoss - (p.commission || 0) - (p.swap || 0);
 
+    // Mobile clients: ticket/orderId as string; MANUAL → MANUAL_CLOSE like live engine.
+    const ticket = p.ticket != null ? String(p.ticket) : null;
+    const closeTicket = p.closeTicket != null ? String(p.closeTicket) : null;
+    const closeReason =
+      p.closeReason === "MANUAL" ? "MANUAL_CLOSE" : p.closeReason || null;
+
     return {
-      positionId: p.positionId,
-      orderId: p.ticket,
-      ticket: p.ticket,
+      positionId: p.positionId != null ? String(p.positionId) : null,
+      orderId: ticket,
+      ticket,
       symbol: p.symbol,
       qty: p.volume,
       side: p.side,
@@ -410,8 +416,8 @@ export async function getPositionsService({
       grossProfit: Number((Number(p.realizedPnL) || 0).toFixed(2)),
 
       status: p.status,
-      closeReason: p.closeReason,
-      closeTicket: p.closeTicket,
+      closeReason,
+      closeTicket,
     };
   });
 
