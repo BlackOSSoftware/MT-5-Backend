@@ -244,13 +244,26 @@ export async function getTradeSummaryService({ accountId, from, to }) {
     totalSwap: 0,
   };
 
+  const totalDeposit = Number(Number(totals.totalDeposit || 0).toFixed(2));
+  const totalWithdraw = Number(Number(totals.totalWithdraw || 0).toFixed(2));
+  const totalPnL = Number(Number(totals.totalPnL || 0).toFixed(2));
+  const totalCommission = Number(Number(totals.totalCommission || 0).toFixed(2));
+  const totalSwap = Number(Number(totals.totalSwap || 0).toFixed(2));
+
+  // MT5 history summary Balance = deposits − withdrawals + closed P/L (floor at 0).
+  // Keep this independent of any post-period cash/bonus split on the live account.
+  const periodBalance = Number(
+    Math.max(0, totalDeposit - totalWithdraw + totalPnL).toFixed(2)
+  );
+
   return {
-    totalDeposit: Number(totals.totalDeposit.toFixed(2)),
-    totalWithdraw: Number(totals.totalWithdraw.toFixed(2)),
-    totalPnL: Number(totals.totalPnL.toFixed(2)),
-    totalCommission: Number(totals.totalCommission.toFixed(2)),
-    totalSwap: Number(totals.totalSwap.toFixed(2)),
-    balance: account ? Number(account.balance.toFixed(2)) : 0,
+    totalDeposit,
+    totalWithdraw,
+    totalPnL,
+    totalCommission,
+    totalSwap,
+    balance: periodBalance,
+    accountBalance: account ? Number(Number(account.balance || 0).toFixed(2)) : 0,
   };
 }
 export async function getPositionsService({
@@ -408,8 +421,10 @@ export async function getPositionsService({
       ? -Number(transaction.amount || 0)
       : Number(transaction.amount || 0);
 
+    const balanceId = String(transaction._id);
     formatted.push({
-      orderId: null,
+      orderId: balanceId,
+      positionId: balanceId,
       type: "BALANCE",
       transactionType: transaction.type,
       isBalanceEntry: true,
