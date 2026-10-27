@@ -44,6 +44,17 @@ async function ensureOpenPositionInEngine(accountId, positionId) {
   }
 }
 
+function dropPositionFromEngineRam(accountId, positionId) {
+  const acc = tradeEngine.accounts.get(String(accountId));
+  if (!acc?.positions?.has?.(String(positionId))) return;
+  acc.positions.delete(String(positionId));
+  try {
+    acc.recalc?.();
+  } catch {
+    /* ignore */
+  }
+}
+
 /* =========================
    COMMON: ACCOUNT OWNERSHIP
 ========================= */
@@ -146,13 +157,71 @@ export async function closePosition(req, res) {
     }
 
     await verifyAccountOwnership(userId, accountId);
-    await ensureOpenPositionInEngine(accountId, positionId);
 
-    const result = tradeEngine.squareOffPosition({
-      accountId,
-      positionId,
+    const accId = String(accountId);
+    const posId = String(positionId);
+
+    // Idempotent: already closed on app/web — just clear local RAM ghosts.
+    const existing = await Trade.findOne({
+      accountId: accId,
+      positionId: posId,
+    })
+      .select("status realizedPnL ticket closeTicket")
+      .lean();
+
+    if (!existing) {
+      return res.status(400).json({
+        status: "error",
+        message: "Position not found",
+      });
+    }
+
+    if (existing.status === "CLOSED" || existing.status === "CLOSING") {
+      dropPositionFromEngineRam(accId, posId);
+      return res.json({
+        status: "success",
+        data: {
+          positionId: posId,
+          ticket: existing.ticket,
+          closeTicket: existing.closeTicket,
+          realizedPnL: Number(existing.realizedPnL || 0),
+          alreadyClosed: true,
+        },
+      });
+    }
+
+    await ensureOpenPositionInEngine(accId, posId);
+
+    // Claim close so a parallel app/web request cannot double-apply PnL.
+    const claimed = await Trade.findOneAndUpdate(
+      { accountId: accId, positionId: posId, status: "OPEN" },
+      { $set: { status: "CLOSING", closeReason: "MANUAL" } },
+      { new: false },
+    );
+
+    if (!claimed) {
+      dropPositionFromEngineRam(accId, posId);
+      const again = await Trade.findOne({ accountId: accId, positionId: posId })
+        .select("status realizedPnL ticket closeTicket")
+        .lean();
+      return res.json({
+        status: "success",
+        data: {
+          positionId: posId,
+          ticket: again?.ticket,
+          closeTicket: again?.closeTicket,
+          realizedPnL: Number(again?.realizedPnL || 0),
+          alreadyClosed: true,
+        },
+      });
+    }
+
+    const result = await tradeEngine.squareOffPosition({
+      accountId: accId,
+      positionId: posId,
       reason: "MANUAL",
       closeTicket: await nextOrderTicket(),
+      awaitLedger: true,
     });
 
     return res.json({ status: "success", data: result });

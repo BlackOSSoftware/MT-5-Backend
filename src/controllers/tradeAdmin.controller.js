@@ -824,11 +824,49 @@ export const adminClosePosition = async (req, res) => {
       ip
     );
 
-    const result = tradeEngine.squareOffPosition({
-      accountId: String(account._id),
-      positionId: resolvedPositionId,
+    const accountId = String(account._id);
+    const posId = String(resolvedPositionId);
+
+    const existing = await Trade.findOne({
+      accountId,
+      positionId: posId,
+    })
+      .select("status realizedPnL ticket closeTicket")
+      .lean();
+
+    if (existing && (existing.status === "CLOSED" || existing.status === "CLOSING")) {
+      const eng = tradeEngine.accounts.get(accountId);
+      if (eng?.positions?.has?.(posId)) {
+        eng.positions.delete(posId);
+        try {
+          eng.recalc?.();
+        } catch {
+          /* ignore */
+        }
+      }
+      return res.json({
+        success: true,
+        data: {
+          positionId: posId,
+          ticket: existing.ticket,
+          closeTicket: existing.closeTicket,
+          realizedPnL: Number(existing.realizedPnL || 0),
+          alreadyClosed: true,
+        },
+      });
+    }
+
+    await Trade.findOneAndUpdate(
+      { accountId, positionId: posId, status: "OPEN" },
+      { $set: { status: "CLOSING", closeReason: "MANUAL" } },
+    );
+
+    const result = await tradeEngine.squareOffPosition({
+      accountId,
+      positionId: posId,
       reason: "MANUAL",
       closeTicket: await nextOrderTicket(),
+      awaitLedger: true,
     });
 
     return res.json({ success: true, data: result });

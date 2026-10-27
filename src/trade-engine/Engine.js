@@ -7,6 +7,7 @@ import { Position } from "./Position.js";
 import { RiskManager } from "./RiskManager.js";
 import { engineEvents } from "./EngineEvents.js";
 import { ledgerQueue } from "./LedgerQueue.js";
+import { publishPositionClosed } from "./EngineSyncBus.js";
 
 const DEBUG_LIVE = true;
 
@@ -1464,7 +1465,14 @@ export class Engine {
      CLOSE
   ========================== */
 
-  closePositionInternal(account, pos, reason, sym, closeTicket = null) {
+  closePositionInternal(
+    account,
+    pos,
+    reason,
+    sym,
+    closeTicket = null,
+    { deferLedger = false } = {},
+  ) {
     // use per-account formatted prices for PnL and close price
     let formatted = { bid: sym.bid, ask: sym.ask };
     try {
@@ -1506,7 +1514,7 @@ export class Engine {
     // recalc after balance change
     this.recalcUsedMargin(account);
 
-    ledgerQueue.enqueue("TRADE_CLOSE", {
+    const closePayload = {
       userId: account.userId,
       accountId: account.accountId,
       positionId: pos.positionId,
@@ -1521,7 +1529,19 @@ export class Engine {
       realBalanceExhaustedByLoss,
       bonusPercent: Number(account.bonus_percent) || 0,
       closedAt: Date.now(),
-    });
+    };
+
+    // Tell other workers immediately — do not wait for ledger (prevents double-close).
+    try {
+      publishPositionClosed(
+        account.accountId,
+        pos.positionId,
+        Number(account.balance.toFixed(2)),
+        Number(account.bonus_balance || 0),
+      );
+    } catch (err) {
+      console.error("[ENGINE] publishPositionClosed failed", err);
+    }
 
     // Emit account & position removal (position removed so send minimal info)
     try {
@@ -1563,6 +1583,13 @@ export class Engine {
     } catch (err) {
       console.error("[ENGINE] emit LIVE_ACCOUNT failed (closePosition)", err);
     }
+
+    // SL/TP/stop-out: async ledger. Manual squareOff: caller awaits ledger.
+    if (!deferLedger && closePayload) {
+      ledgerQueue.enqueue("TRADE_CLOSE", closePayload);
+    }
+
+    return closePayload;
   }
 
   forceCloseWorst(account) {
@@ -1592,11 +1619,12 @@ export class Engine {
     }
   }
 
-  squareOffPosition({
+  async squareOffPosition({
     accountId,
     positionId,
     reason = "MANUAL",
     closeTicket = null,
+    awaitLedger = true,
   }) {
     const account = this.accounts.get(accountId);
 
@@ -1610,7 +1638,19 @@ export class Engine {
       requirePrice: true,
     });
 
-    this.closePositionInternal(account, pos, reason, sym, closeTicket);
+    const closePayload = this.closePositionInternal(
+      account,
+      pos,
+      reason,
+      sym,
+      closeTicket,
+      { deferLedger: awaitLedger },
+    );
+
+    // Manual/API closes must persist to DB before response so app + web agree.
+    if (awaitLedger && closePayload) {
+      await ledgerQueue.enqueueAndWait("TRADE_CLOSE", closePayload);
+    }
 
     return {
       positionId,

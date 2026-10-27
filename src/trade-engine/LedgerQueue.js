@@ -4,7 +4,10 @@ import Transaction from "../models/Transaction.model.js";
 import PendingOrder from "../models/PendingOrder.model.js";
 import Brokerage from "../models/Brokerage.model.js";
 import { engineEvents } from "./EngineEvents.js";
-import { publishAccountBalance } from "./EngineSyncBus.js";
+import {
+  publishAccountBalance,
+  publishPositionClosed,
+} from "./EngineSyncBus.js";
 import { consumeNonWithdrawableBalance } from "../utils/nonWithdrawable.util.js";
 import {
   nextDealTicket,
@@ -31,6 +34,19 @@ class LedgerQueue {
     });
   }
 
+  /** Await DB persistence (manual close must finish before HTTP returns). */
+  enqueueAndWait(event, payload) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({
+        event,
+        payload,
+        __resolve: resolve,
+        __reject: reject,
+      });
+      this.scheduleDrain();
+    });
+  }
+
   scheduleDrain() {
     if (this.processing) return;
 
@@ -49,9 +65,11 @@ class LedgerQueue {
         const job = this.queue.shift();
 
         try {
-          await this.process(job);
+          const result = await this.process(job);
+          if (typeof job.__resolve === "function") job.__resolve(result);
         } catch (err) {
           console.error("[LEDGER][FATAL]", err);
+          if (typeof job.__reject === "function") job.__reject(err);
         }
       }
     } finally {
@@ -74,8 +92,7 @@ class LedgerQueue {
         break;
 
       case "TRADE_CLOSE":
-        await this.tradeClose(payload);
-        break;
+        return await this.tradeClose(payload);
 
       case "POSITION_MODIFY":
         await this.positionModify(payload);
@@ -241,7 +258,7 @@ class LedgerQueue {
       typeof closeTicket === "number" ? closeTicket : await nextOrderTicket();
 
     const trade = await Trade.findOneAndUpdate(
-      { positionId, status: "OPEN" },
+      { positionId, status: { $in: ["OPEN", "CLOSING"] } },
       {
         $set: {
           closeTicket: outTicket,
@@ -257,8 +274,20 @@ class LedgerQueue {
     );
 
     if (!trade) {
+      // Already closed by another worker/client — still clear RAM everywhere.
+      const existing = await Trade.findOne({ positionId }).select(
+        "status accountId realizedPnL",
+      ).lean();
+      if (existing?.status === "CLOSED") {
+        publishPositionClosed(
+          String(accountId || existing.accountId || ""),
+          String(positionId),
+        );
+        console.log("[LEDGER][TRADE_CLOSE][ALREADY_CLOSED]", positionId);
+        return { alreadyClosed: true, positionId, realizedPnL: existing.realizedPnL };
+      }
       console.error("[LEDGER][TRADE_CLOSE] Trade not found", positionId);
-      return;
+      return { alreadyClosed: false, positionId, missing: true };
     }
 
     const account = await Account.findById(accountId);
@@ -341,8 +370,14 @@ class LedgerQueue {
     const persistedBonusBalance = Number(accountAfter.bonus_balance || 0);
     const newEquity = Number(accountAfter.equity ?? newBalance + persistedBonusBalance);
 
-    // Fanout: keep other Node workers' RAM in sync with the DB balance update.
+    // Fanout: keep other Node workers' RAM in sync (balance + drop closed position).
     publishAccountBalance(String(accountId), newBalance, persistedBonusBalance);
+    publishPositionClosed(
+      String(accountId),
+      String(positionId),
+      newBalance,
+      persistedBonusBalance,
+    );
 
     const txn = await Transaction.create({
       user: userId || trade.userId,
@@ -395,6 +430,14 @@ class LedgerQueue {
       txnId: txn._id.toString(),
       pnl,
     });
+
+    return {
+      alreadyClosed: false,
+      positionId,
+      realizedPnL: pnl,
+      balance: newBalance,
+      bonusBalance: persistedBonusBalance,
+    };
   }
 
   /* =========================

@@ -105,6 +105,30 @@ export function startEngineSyncBus() {
         return;
       }
 
+      // Another worker closed this position — drop it from local RAM so app/web
+      // cannot square-off the same trade twice (double PnL / balance chaos).
+      if (type === "POSITION_CLOSED") {
+        const accountId = String(payload?.accountId || "");
+        const positionId = String(payload?.positionId || "");
+        if (accountId && positionId) {
+          const acc = tradeEngine.accounts.get(accountId);
+          if (acc?.positions?.has?.(positionId)) {
+            acc.positions.delete(positionId);
+            try {
+              acc.recalc?.();
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+        if (payload?.balance != null && accountId) {
+          EngineSync.updateBalance(accountId, payload.balance, {
+            bonusBalance: payload?.bonusBalance,
+          }).catch(() => {});
+        }
+        return;
+      }
+
       if (type === "ACCOUNT_REMOVE") {
         EngineSync.removeAccount(payload?.accountId);
         return;
@@ -177,6 +201,22 @@ export function publishAccountBalance(accountId, balance, bonusBalance) {
     accountId: String(accountId),
     balance,
     bonusBalance,
+  });
+}
+
+/** Fanout: remove closed position from every worker's engine RAM. */
+export function publishPositionClosed(
+  accountId,
+  positionId,
+  balance,
+  bonusBalance,
+) {
+  if (!accountId || !positionId) return;
+  publish("POSITION_CLOSED", {
+    accountId: String(accountId),
+    positionId: String(positionId),
+    ...(balance != null ? { balance: Number(balance) } : {}),
+    ...(bonusBalance != null ? { bonusBalance: Number(bonusBalance) } : {}),
   });
 }
 
