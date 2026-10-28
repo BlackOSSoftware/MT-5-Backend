@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Account from "../models/Account.model.js";
 import AccountAuth from "../models/AccountAuth.model.js";
+import Broker from "../models/Broker.model.js";
 import User from "../models/User.model.js";
 
 import { comparePassword, sha256, hashPassword } from "../utils/hash.util.js";
@@ -11,6 +12,21 @@ import {
 } from "../utils/jwt.util.js";
 import { sendAccountCreatedMail } from "../utils/mail.util.js";
 import { generateStrongPassword } from "../utils/accountNumber.util.js";
+
+/** App UI brand (never expose API host). From account → user broker. */
+async function resolveBrokerBrand(account, user) {
+  const brokerId = account?.brokerId || user?.brokerId || null;
+  if (!brokerId) {
+    return { brokerCode: "", brokerDisplayName: "" };
+  }
+  const broker = await Broker.findById(brokerId)
+    .select("code displayName")
+    .lean();
+  return {
+    brokerCode: broker?.code || "",
+    brokerDisplayName: broker?.displayName || broker?.code || "",
+  };
+}
 
 function isObjectIdString(value) {
   const id = String(value ?? "").trim();
@@ -91,6 +107,22 @@ async function createMissingAccountAuth(account, { tradeHash, watchHash }) {
 /* =====================================================
    ACCOUNT LOGIN (TRADE / WATCH)
 ===================================================== */
+/** Login IDs: typed value, with/without "AC" prefix (users often skip AC). */
+function accountNumberLoginCandidates(raw) {
+  const s = String(raw || "")
+    .trim()
+    .replace(/\s+/g, "");
+  if (!s) return [];
+  const upper = s.toUpperCase();
+  const out = [s];
+  if (upper.startsWith("AC") && s.length > 2) {
+    out.push(s.slice(2));
+  } else if (/^\d+$/.test(s)) {
+    out.push(`AC${s}`);
+  }
+  return [...new Set(out)];
+}
+
 export async function accountLoginService({
   account_number,
   password,
@@ -102,10 +134,15 @@ export async function accountLoginService({
     throw new Error("Invalid request");
   }
 
-  const account = await Account.findOne({
-    account_number,
-    status: "active",
-  }).lean();
+  const candidates = accountNumberLoginCandidates(account_number);
+  let account = null;
+  for (const num of candidates) {
+    account = await Account.findOne({
+      account_number: num,
+      status: "active",
+    }).lean();
+    if (account) break;
+  }
 
   if (!account) {
     throw new Error("Invalid credentials");
@@ -184,8 +221,9 @@ export async function accountLoginService({
   );
 
   const user = await User.findById(account.user_id)
-    .select("name email")
+    .select("name email brokerId")
     .lean();
+  const brand = await resolveBrokerBrand(account, user);
 
   return {
     tradeToken,
@@ -198,6 +236,8 @@ export async function accountLoginService({
     // naam dikhane ke liye).
     name: user?.name || "",
     email: user?.email || "",
+    brokerCode: brand.brokerCode,
+    brokerDisplayName: brand.brokerDisplayName,
   };
 }
 
@@ -279,8 +319,9 @@ export async function refreshAccountSessionService({ refreshToken }) {
   );
 
   const user = await User.findById(account.user_id)
-    .select("name email")
+    .select("name email brokerId")
     .lean();
+  const brand = await resolveBrokerBrand(account, user);
 
   return {
     tradeToken,
@@ -291,6 +332,8 @@ export async function refreshAccountSessionService({ refreshToken }) {
     account_type: account.account_type,
     name: user?.name || "",
     email: user?.email || "",
+    brokerCode: brand.brokerCode,
+    brokerDisplayName: brand.brokerDisplayName,
   };
 }
 
@@ -303,14 +346,17 @@ export async function getAccountProfileService({ accountId }) {
     throw new Error("Account not found");
   }
   const user = await User.findById(account.user_id)
-    .select("name email")
+    .select("name email brokerId")
     .lean();
+  const brand = await resolveBrokerBrand(account, user);
   return {
     accountId: account._id.toString(),
     account_number: account.account_number,
     account_type: account.account_type,
     name: user?.name || "",
     email: user?.email || "",
+    brokerCode: brand.brokerCode,
+    brokerDisplayName: brand.brokerDisplayName,
   };
 }
 
