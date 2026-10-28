@@ -1,33 +1,52 @@
-import AccountPlan from '../models/AccountPlan.model.js';
-import redis from '../config/redis.js';
+import AccountPlan from "../models/AccountPlan.model.js";
+import redis from "../config/redis.js";
 
 /**
- * Redis cache config
+ * Redis cache config (per broker)
  */
-const CACHE_KEY = 'account_plans_active';
-const CACHE_TTL = 60; // testing ke liye 60 sec
+const CACHE_KEY_PREFIX = "account_plans_active";
+const CACHE_TTL = 60;
+
+function cacheKeyForBroker(brokerId) {
+  return `${CACHE_KEY_PREFIX}:${brokerId ? String(brokerId) : "none"}`;
+}
+
+async function bustPlanCache(brokerId = null) {
+  try {
+    if (brokerId) {
+      await redis.del(cacheKeyForBroker(brokerId));
+    }
+    // legacy global key from older code
+    await redis.del("account_plans_active");
+  } catch {
+    // ignore cache errors
+  }
+}
 
 /**
- * Ensure only one default demo plan exists
+ * Ensure only one default demo plan exists per broker
  */
-async function ensureSingleDefaultDemoPlan({ planId, makeDefault }) {
+async function ensureSingleDefaultDemoPlan({ planId, makeDefault, brokerId }) {
   if (!makeDefault) return;
 
-  // 1) Unset default from others
-  await AccountPlan.updateMany(
-    { _id: { $ne: planId }, is_default_demo_plan: true },
-    { $set: { is_default_demo_plan: false } }
-  );
+  const unsetFilter = {
+    _id: { $ne: planId },
+    is_default_demo_plan: true,
+  };
+  if (brokerId) unsetFilter.brokerId = brokerId;
 
-  // 2) Force demo + active
+  await AccountPlan.updateMany(unsetFilter, {
+    $set: { is_default_demo_plan: false },
+  });
+
   await AccountPlan.updateOne(
     { _id: planId },
     {
       $set: {
         is_default_demo_plan: true,
         is_demo_allowed: true,
-        isActive: true
-      }
+        isActive: true,
+      },
     }
   );
 }
@@ -39,35 +58,15 @@ function normalizePlanData(data) {
   return {
     ...data,
 
-    // ✅ SPREAD PIPS
-    spreadPips:
-      typeof data.spreadPips === 'number'
-        ? data.spreadPips
-        : 0,
-
-    // ✅ SPREAD ENABLE / DISABLE
+    spreadPips: typeof data.spreadPips === "number" ? data.spreadPips : 0,
     spread_enabled:
-      typeof data.spread_enabled === 'boolean'
-        ? data.spread_enabled
-        : true,
-
-    // ✅ COMMISSION
+      typeof data.spread_enabled === "boolean" ? data.spread_enabled : true,
     commission_per_lot:
-      typeof data.commission_per_lot === 'number'
-        ? data.commission_per_lot
-        : 0,
-
-    // ✅ SWAP CHARGE
+      typeof data.commission_per_lot === "number" ? data.commission_per_lot : 0,
     swap_charge:
-      typeof data.swap_charge === 'number'
-        ? Math.abs(data.swap_charge)
-        : 0,
-
-    // ✅ SWAP ENABLE
+      typeof data.swap_charge === "number" ? Math.abs(data.swap_charge) : 0,
     swap_enabled:
-      typeof data.swap_enabled === 'boolean'
-        ? data.swap_enabled
-        : true
+      typeof data.swap_enabled === "boolean" ? data.swap_enabled : true,
   };
 }
 
@@ -78,26 +77,39 @@ export async function createPlan(data) {
 
   const plan = await AccountPlan.create(normalizedData);
 
-  // only one default demo plan
   await ensureSingleDefaultDemoPlan({
     planId: plan._id,
-    makeDefault: Boolean(plan.is_default_demo_plan)
+    makeDefault: Boolean(plan.is_default_demo_plan),
+    brokerId: plan.brokerId || null,
   });
 
-  // clear cache
-  await redis.del(CACHE_KEY);
-
+  await bustPlanCache(plan.brokerId);
   return plan;
 }
 
 /* ================= UPDATE ================= */
 
-export async function updatePlan(id, data) {
+export async function updatePlan(id, data, { brokerId = null } = {}) {
   const wantsDefaultDemoPlan = data?.is_default_demo_plan === true;
+  const existing = await AccountPlan.findById(id).select("brokerId").lean();
+  if (!existing) {
+    const err = new Error("Account plan not found");
+    err.statusCode = 404;
+    throw err;
+  }
+  if (brokerId && String(existing.brokerId) !== String(brokerId)) {
+    const err = new Error("Account plan not found");
+    err.statusCode = 404;
+    throw err;
+  }
 
   if (wantsDefaultDemoPlan) {
     await AccountPlan.updateMany(
-      { _id: { $ne: id }, is_default_demo_plan: true },
+      {
+        _id: { $ne: id },
+        is_default_demo_plan: true,
+        ...(existing.brokerId ? { brokerId: existing.brokerId } : {}),
+      },
       { $set: { is_default_demo_plan: false } }
     );
   }
@@ -111,37 +123,38 @@ export async function updatePlan(id, data) {
       ...(wantsDefaultDemoPlan
         ? {
             is_demo_allowed: true,
-            isActive: true
+            isActive: true,
           }
-        : {})
+        : {}),
     },
     { new: true }
   ).lean();
 
   if (!plan) {
-    const err = new Error('Account plan not found');
+    const err = new Error("Account plan not found");
     err.statusCode = 404;
     throw err;
   }
 
-  // clear cache
-  await redis.del(CACHE_KEY);
-
+  await bustPlanCache(plan.brokerId);
   return plan;
 }
 
 /* ================= DELETE ================= */
 
-export async function deletePlan(id) {
-  const plan = await AccountPlan.findByIdAndDelete(id);
+export async function deletePlan(id, { brokerId = null } = {}) {
+  const filter = { _id: id };
+  if (brokerId) filter.brokerId = brokerId;
+
+  const plan = await AccountPlan.findOneAndDelete(filter);
 
   if (!plan) {
-    const err = new Error('Account plan not found');
+    const err = new Error("Account plan not found");
     err.statusCode = 404;
     throw err;
   }
 
-  await redis.del(CACHE_KEY);
+  await bustPlanCache(plan.brokerId);
 }
 
 /* ================= ADMIN ================= */
@@ -154,41 +167,49 @@ export async function getAllPlansAdmin(brokerId = null) {
 
 /* ================= USER ================= */
 
-export async function getActivePlans() {
+/**
+ * Active plans for one broker only.
+ * No brokerId → empty list (never leak other brokers' plans).
+ */
+export async function getActivePlans(brokerId = null) {
+  if (!brokerId) return [];
+
+  const key = cacheKeyForBroker(brokerId);
   const start = process.hrtime.bigint();
 
-  // Redis GET
-  const cached = await redis.get(CACHE_KEY);
-
+  const cached = await redis.get(key);
   if (cached) {
     const end = process.hrtime.bigint();
-
-    console.log(
-      'REDIS HIT |',
-      Number(end - start) / 1_000_000,
-      'ms'
-    );
-
+    console.log("REDIS HIT |", Number(end - start) / 1_000_000, "ms", key);
     return JSON.parse(cached);
   }
 
-  console.log('REDIS MISS');
+  console.log("REDIS MISS", key);
 
-  // Mongo Query
-  const plans = await AccountPlan.find({ isActive: true })
+  const plans = await AccountPlan.find({
+    isActive: true,
+    brokerId,
+  })
     .sort({ createdAt: -1 })
     .lean();
 
-  // Redis SET
-  await redis.set(
-    CACHE_KEY,
-    JSON.stringify(plans),
-    'EX',
-    CACHE_TTL
-  );
-
-  const end = process.hrtime.bigint();
-
-
+  await redis.set(key, JSON.stringify(plans), "EX", CACHE_TTL);
   return plans;
+}
+
+/**
+ * Default demo plan id for a broker (signup auto-demo).
+ */
+export async function getDefaultDemoPlanIdForBroker(brokerId) {
+  if (!brokerId) return null;
+  const plan = await AccountPlan.findOne(
+    {
+      brokerId,
+      isActive: true,
+      is_demo_allowed: true,
+      is_default_demo_plan: true,
+    },
+    { _id: 1 }
+  ).lean();
+  return plan?._id ? String(plan._id) : null;
 }

@@ -11,8 +11,8 @@ import { brokerAdminAuth } from '../../middlewares/brokerAuth.middleware.js';
 
 const router = express.Router();
 
-/* USER */
-router.get('/active', getPlansForUser);
+/* USER — broker-scoped (only plans of the logged-in user's broker) */
+router.get('/active', authMiddleware, getPlansForUser);
 
 /* ADMIN */
 router.post('/', brokerAdminAuth, createAccountPlan);

@@ -107,26 +107,27 @@ async function resolveDefaultBrokerId() {
   return broker?._id ? String(broker._id) : null;
 }
 
-async function getDefaultDemoPlanId() {
-  // 1) Redis hit
-  const cached = await redis.get(DEFAULT_DEMO_PLAN_CACHE_KEY);
+async function getDefaultDemoPlanId(brokerId = null) {
+  if (!brokerId) return null;
+
+  const cacheKey = `${DEFAULT_DEMO_PLAN_CACHE_KEY}:${String(brokerId)}`;
+  const cached = await redis.get(cacheKey);
   if (cached) return cached;
 
-  // 2) Redis miss -> fetch from DB
   const plan = await AccountPlan.findOne(
     {
+      brokerId,
       isActive: true,
       is_demo_allowed: true,
-      is_default_demo_plan: true
+      is_default_demo_plan: true,
     },
     { _id: 1 }
   ).lean();
 
   if (!plan?._id) return null;
 
-  // 3) Save to redis
   await redis.set(
-    DEFAULT_DEMO_PLAN_CACHE_KEY,
+    cacheKey,
     String(plan._id),
     'EX',
     DEFAULT_DEMO_PLAN_CACHE_TTL
@@ -297,11 +298,11 @@ export async function verifyEmailService(token) {
 
       if (existingDemo > 0) return;
 
-      //  get default demo plan id from redis first
-      const demoPlanId = await getDefaultDemoPlanId();
+      const owner = await User.findById(auth.user_id).select('brokerId').lean();
+      // Only auto-create demo when THIS broker has a default demo plan
+      const demoPlanId = await getDefaultDemoPlanId(owner?.brokerId || null);
       if (!demoPlanId) return;
 
-      //  create demo account using your createAccount() service
       await createAccount({
         userId: auth.user_id,
         account_plan_id: demoPlanId,

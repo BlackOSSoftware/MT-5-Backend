@@ -56,12 +56,16 @@ export async function createAccount({
 
   /* ================= PLAN ================= */
 
+  const userForBroker = await User.findById(userId).select("brokerId").lean();
+  const userBrokerId = userForBroker?.brokerId || null;
+
   const plan = await AccountPlan.findOne({
     _id: account_plan_id,
     isActive: true,
+    ...(userBrokerId ? { brokerId: userBrokerId } : { _id: null }),
   }).lean();
 
-  if (!plan) throw new Error("Invalid plan");
+  if (!plan) throw new Error("Invalid plan for this broker");
 
   // Keep live/demo plans isolated:
   // - demo plan (is_demo_allowed=true) can create only demo accounts
@@ -148,8 +152,7 @@ export async function createAccount({
 
   /* ================= CREATE ================= */
 
-  const owner = await User.findById(userId).select("brokerId").lean();
-  const ownerBrokerId = owner?.brokerId || null;
+  const ownerBrokerId = userBrokerId;
 
   const account = await Account.create({
     user_id: userId,
