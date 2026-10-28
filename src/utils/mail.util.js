@@ -22,18 +22,24 @@ const TEMPLATE_DIR = path.join(__dirname, "../templates/emails");
 
 const transporterCache = new Map();
 
-function envKey(prefix, name) {
-  if (!prefix) return process.env[name];
-  return process.env[`${prefix}_${name}`] || process.env[name];
-}
-
-function smtpPrefixForBrokerCode(brokerCode) {
+/**
+ * Read SMTP_* for default broker, or SMTP_<CODE>_* for others.
+ * Example: OCEANAPROFX → SMTP_OCEANAPROFX_HOST (NOT SMTP_OCEANAPROFX_SMTP_HOST).
+ */
+function smtpEnv(brokerCode, field) {
   const code = String(brokerCode || "")
     .trim()
     .toUpperCase();
-  if (!code || code === "BLACKOS" || code === "DEFAULT") return "";
-  // e.g. OCEANAPROFX → SMTP_OCEANAPROFX_HOST
-  return `SMTP_${code}`;
+  const usePrefixed =
+    code && code !== "BLACKOS" && code !== "DEFAULT";
+  if (usePrefixed) {
+    const keyed = process.env[`SMTP_${code}_${field}`];
+    if (keyed != null && String(keyed).trim() !== "") return keyed;
+    // Do NOT fall back to FPTrade credentials for a named broker —
+    // that silently sends Oceana mail from contact@fptradess.com.
+    return "";
+  }
+  return process.env[`SMTP_${field}`] || "";
 }
 
 function brandForBrokerCode(brokerCode) {
@@ -56,19 +62,19 @@ function brandForBrokerCode(brokerCode) {
 }
 
 function buildSmtpConfig(brokerCode) {
-  const prefix = smtpPrefixForBrokerCode(brokerCode);
-  const host = envKey(prefix, "SMTP_HOST");
-  const port = Number(envKey(prefix, "SMTP_PORT") || 465);
-  const user = envKey(prefix, "SMTP_USER");
-  const pass = envKey(prefix, "SMTP_PASS");
-  const from = envKey(prefix, "SMTP_FROM");
-  const secureRaw = envKey(prefix, "SMTP_SECURE");
+  const code = String(brokerCode || "DEFAULT").trim().toUpperCase() || "DEFAULT";
+  const host = smtpEnv(code, "HOST");
+  const port = Number(smtpEnv(code, "PORT") || 465);
+  const user = smtpEnv(code, "USER");
+  const pass = smtpEnv(code, "PASS");
+  const from = smtpEnv(code, "FROM");
+  const secureRaw = smtpEnv(code, "SECURE");
   const secure =
     secureRaw != null && String(secureRaw).trim() !== ""
       ? String(secureRaw).toLowerCase() === "true"
       : port === 465;
 
-  return { host, port, user, pass, from, secure, brokerCode: brokerCode || "DEFAULT" };
+  return { host, port, user, pass, from, secure, brokerCode: code };
 }
 
 function getTransporter(brokerCode) {
