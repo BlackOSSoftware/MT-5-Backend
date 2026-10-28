@@ -17,6 +17,7 @@ import {
   assertUserBelongsToBroker,
 } from "../utils/brokerScope.js";
 import { healNullBrokerUsersToDefaultBroker } from "./user.service.js";
+import { assertWithdrawMethodEnabled } from "./withdrawMethod.service.js";
 
 /* -------------------- HELPERS -------------------- */
 
@@ -80,6 +81,9 @@ const buildFilter = ({ userId, query, isAdmin }) => {
   return filter;
 };
 
+const hasText = (value) =>
+  typeof value === "string" && value.trim().length > 0;
+
 const validatePayout = ({ method, payout }) => {
   if (!method) {
     return { ok: false, message: "Withdrawal method is required" };
@@ -89,36 +93,77 @@ const validatePayout = ({ method, payout }) => {
     return { ok: false, message: "Payout details are required" };
   }
 
-  if (method === "UPI") {
-    if (!payout.upi_id || typeof payout.upi_id !== "string") {
+  const code = String(method).toUpperCase();
+
+  if (code === "UPI") {
+    if (!hasText(payout.upi_id)) {
       return { ok: false, message: "UPI ID is required" };
     }
   }
 
-  if (method === "BANK") {
+  if (code === "BANK") {
     if (
-      !payout.bank_name ||
-      !payout.account_holder_name ||
-      !payout.account_number
+      !hasText(payout.bank_name) ||
+      !hasText(payout.account_holder_name) ||
+      !hasText(payout.account_number)
     ) {
       return { ok: false, message: "Complete bank details are required" };
     }
   }
 
-  if (method === "CRYPTO") {
-    if (!payout.crypto_network || !payout.crypto_address) {
+  if (code === "INDIAN_BANK") {
+    if (
+      !hasText(payout.bank_name) ||
+      !hasText(payout.account_holder_name) ||
+      !hasText(payout.account_number) ||
+      !hasText(payout.ifsc)
+    ) {
+      return {
+        ok: false,
+        message: "Complete Indian bank details (including IFSC) are required",
+      };
+    }
+  }
+
+  if (code === "NETELLER" || code === "SKRILL") {
+    if (!hasText(payout.email)) {
+      return { ok: false, message: `${code} email is required` };
+    }
+  }
+
+  if (code === "USDT" || code === "CRYPTO") {
+    if (!hasText(payout.crypto_network) || !hasText(payout.crypto_address)) {
       return { ok: false, message: "Crypto network & address are required" };
     }
   }
 
-  if (method === "MANUAL") {
-    if (!payout.account_holder_name || !payout.account_number) {
+  if (code === "BITCOIN") {
+    if (!hasText(payout.crypto_address)) {
+      return { ok: false, message: "Bitcoin address is required" };
+    }
+  }
+
+  if (code === "MANUAL") {
+    if (!hasText(payout.account_holder_name) || !hasText(payout.account_number)) {
       return { ok: false, message: "Manual payout details are required" };
     }
   }
 
   return { ok: true, message: "OK" };
 };
+
+const buildPayoutSnapshot = (payout = {}) => ({
+  upi_id: payout?.upi_id || "",
+  bank_name: payout?.bank_name || "",
+  account_holder_name: payout?.account_holder_name || "",
+  account_number: payout?.account_number || "",
+  ifsc: payout?.ifsc || "",
+  swift_code: payout?.swift_code || "",
+  email: payout?.email || "",
+  crypto_network: payout?.crypto_network || payout?.wallet_network || "",
+  crypto_address: payout?.crypto_address || "",
+  note: payout?.note || "",
+});
 
 const computeBonusDeduction = ({
   amount,
@@ -257,16 +302,7 @@ export const adminCreateWithdrawal = async ({
             account: account._id,
             amount,
             method,
-            payout: {
-              upi_id: payout?.upi_id || "",
-              bank_name: payout?.bank_name || "",
-              account_holder_name: payout?.account_holder_name || "",
-              account_number: payout?.account_number || "",
-              ifsc: payout?.ifsc || "",
-              crypto_network: payout?.crypto_network || "",
-              crypto_address: payout?.crypto_address || "",
-              note: payout?.note || "",
-            },
+            payout: buildPayoutSnapshot(payout),
             status: "COMPLETED",
             actionBy: adminId,
             actionAt: importDateTime || new Date(),
@@ -408,6 +444,17 @@ export const createWithdrawal = async ({ userId, ipAddress, payload }) => {
       return { ok: false, statusCode: 400, message: payoutCheck.message };
     }
 
+    const stampBrokerIdEarly = await getUserBrokerId(userId);
+    if (stampBrokerIdEarly) {
+      const enabledCheck = await assertWithdrawMethodEnabled(
+        stampBrokerIdEarly,
+        method,
+      );
+      if (!enabledCheck.ok) {
+        return { ok: false, statusCode: 400, message: enabledCheck.message };
+      }
+    }
+
     let createdWithdrawal = null;
 
     await session.withTransaction(async () => {
@@ -530,16 +577,7 @@ export const createWithdrawal = async ({ userId, ipAddress, payload }) => {
             account: account._id,
             amount,
             method,
-            payout: {
-              upi_id: payout?.upi_id || "",
-              bank_name: payout?.bank_name || "",
-              account_holder_name: payout?.account_holder_name || "",
-              account_number: payout?.account_number || "",
-              ifsc: payout?.ifsc || "",
-              crypto_network: payout?.crypto_network || "",
-              crypto_address: payout?.crypto_address || "",
-              note: payout?.note || "",
-            },
+            payout: buildPayoutSnapshot(payout),
             status: "PENDING",
             ipAddress: ipAddress || "",
             bonus_percent: Number(bonusPercent || 0),

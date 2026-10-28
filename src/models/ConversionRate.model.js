@@ -2,11 +2,17 @@ import mongoose from "mongoose";
 
 const conversionRateSchema = new mongoose.Schema(
   {
+    // GLOBAL (legacy) or BROKER:<ObjectId>
     key: {
       type: String,
       required: true,
       unique: true,
-      default: "GLOBAL",
+    },
+    brokerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Broker",
+      default: null,
+      index: true,
     },
     usdtInr: {
       type: Number,
@@ -27,6 +33,14 @@ const conversionRateSchema = new mongoose.Schema(
     },
   },
   { timestamps: true },
+);
+
+conversionRateSchema.index(
+  { brokerId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { brokerId: { $type: "objectId" } },
+  },
 );
 
 export default mongoose.model("ConversionRate", conversionRateSchema);

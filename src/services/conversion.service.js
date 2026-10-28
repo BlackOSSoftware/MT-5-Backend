@@ -10,25 +10,55 @@ function round(value, precision = 8) {
   return Math.round((value + Number.EPSILON) * factor) / factor;
 }
 
-async function getOrCreateRatesDoc() {
-  let rates = await ConversionRate.findOne({ key: "GLOBAL" });
+function rateKeyForBroker(brokerId) {
+  if (!brokerId) return "GLOBAL";
+  return `BROKER:${String(brokerId)}`;
+}
+
+async function getGlobalSeedRates() {
+  const global = await ConversionRate.findOne({ key: "GLOBAL" }).lean();
+  if (!global) return { ...DEFAULT_RATES };
+  return {
+    usdtInr: global.usdtInr ?? DEFAULT_RATES.usdtInr,
+    btcUsdt: global.btcUsdt ?? DEFAULT_RATES.btcUsdt,
+  };
+}
+
+/**
+ * Per-broker conversion rates. Each broker admin edits their own doc.
+ * Missing broker docs are created from GLOBAL (legacy) or defaults — then diverge.
+ */
+async function getOrCreateRatesDoc(brokerId = null) {
+  const key = rateKeyForBroker(brokerId);
+  let rates = await ConversionRate.findOne({ key });
+
+  if (!rates && brokerId) {
+    rates = await ConversionRate.findOne({ brokerId });
+  }
 
   if (!rates) {
+    const seed = brokerId ? await getGlobalSeedRates() : { ...DEFAULT_RATES };
     rates = await ConversionRate.create({
-      key: "GLOBAL",
-      ...DEFAULT_RATES,
+      key,
+      brokerId: brokerId || null,
+      ...seed,
     });
   }
 
   return rates;
 }
 
-export async function getConversionRatesService() {
-  const rates = await getOrCreateRatesDoc();
+export async function getConversionRatesService(brokerId = null) {
+  if (!brokerId) {
+    throw new Error("brokerId is required for conversion rates");
+  }
+
+  const rates = await getOrCreateRatesDoc(brokerId);
 
   return {
     usdtInr: rates.usdtInr,
     btcUsdt: rates.btcUsdt,
+    brokerId: rates.brokerId ? String(rates.brokerId) : null,
     updatedAt: rates.updatedAt,
   };
 }
@@ -37,7 +67,12 @@ export async function upsertConversionRatesService({
   usdtInr,
   btcUsdt,
   updatedBy,
+  brokerId = null,
 }) {
+  if (!brokerId) {
+    throw new Error("brokerId is required to update conversion rates");
+  }
+
   const setPayload = {};
 
   if (usdtInr !== undefined) {
@@ -59,17 +94,18 @@ export async function upsertConversionRatesService({
   }
 
   setPayload.updatedBy = updatedBy || null;
+  setPayload.brokerId = brokerId;
 
-  const setOnInsertPayload = { key: "GLOBAL" };
-  if (setPayload.usdtInr === undefined) {
-    setOnInsertPayload.usdtInr = DEFAULT_RATES.usdtInr;
-  }
-  if (setPayload.btcUsdt === undefined) {
-    setOnInsertPayload.btcUsdt = DEFAULT_RATES.btcUsdt;
-  }
+  const key = rateKeyForBroker(brokerId);
+  const seed = await getGlobalSeedRates();
+  const setOnInsertPayload = {
+    key,
+    ...(setPayload.usdtInr === undefined ? { usdtInr: seed.usdtInr } : {}),
+    ...(setPayload.btcUsdt === undefined ? { btcUsdt: seed.btcUsdt } : {}),
+  };
 
   const rates = await ConversionRate.findOneAndUpdate(
-    { key: "GLOBAL" },
+    { key },
     { $set: setPayload, $setOnInsert: setOnInsertPayload },
     { upsert: true, new: true },
   );
@@ -77,6 +113,7 @@ export async function upsertConversionRatesService({
   return {
     usdtInr: rates.usdtInr,
     btcUsdt: rates.btcUsdt,
+    brokerId: rates.brokerId ? String(rates.brokerId) : null,
     updatedAt: rates.updatedAt,
   };
 }
@@ -87,7 +124,12 @@ function normalizeCurrency(currency) {
   return c;
 }
 
-export async function convertAmountService({ amount, fromCurrency, toCurrency }) {
+export async function convertAmountService({
+  amount,
+  fromCurrency,
+  toCurrency,
+  brokerId = null,
+}) {
   if (typeof amount !== "number" || Number.isNaN(amount) || amount <= 0) {
     throw new Error("amount must be a number greater than 0");
   }
@@ -106,11 +148,11 @@ export async function convertAmountService({ amount, fromCurrency, toCurrency })
       fromCurrency,
       toCurrency,
       convertedAmount: round(amount),
-      rates: await getConversionRatesService(),
+      rates: await getConversionRatesService(brokerId),
     };
   }
 
-  const rates = await getConversionRatesService();
+  const rates = await getConversionRatesService(brokerId);
 
   let amountInUsdt;
   if (from === "USDT") amountInUsdt = amount;

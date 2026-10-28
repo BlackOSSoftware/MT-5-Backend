@@ -48,7 +48,17 @@ const WithdrawalSchema = new mongoose.Schema(
     // METHOD
     method: {
       type: String,
-      enum: ["UPI", "BANK", "CRYPTO", "MANUAL"],
+      enum: [
+        "UPI",
+        "BANK",
+        "INDIAN_BANK",
+        "NETELLER",
+        "SKRILL",
+        "USDT",
+        "BITCOIN",
+        "CRYPTO",
+        "MANUAL",
+      ],
       required: true,
       index: true,
     },
@@ -62,7 +72,7 @@ const WithdrawalSchema = new mongoose.Schema(
         trim: true,
       },
 
-      // BANK
+      // BANK / INDIAN_BANK
       bank_name: {
         type: String,
         default: "",
@@ -83,8 +93,21 @@ const WithdrawalSchema = new mongoose.Schema(
         default: "",
         trim: true,
       },
+      swift_code: {
+        type: String,
+        default: "",
+        trim: true,
+      },
 
-      // CRYPTO
+      // NETELLER / SKRILL
+      email: {
+        type: String,
+        default: "",
+        trim: true,
+        lowercase: true,
+      },
+
+      // USDT / BITCOIN / CRYPTO
       crypto_network: {
         type: String,
         default: "",
