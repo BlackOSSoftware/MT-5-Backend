@@ -8,7 +8,16 @@ import {
  */
 export async function createInquiry(req, res) {
   try {
-    const { name, email, phone, title, description } = req.body;
+    const {
+      name,
+      email,
+      phone,
+      title,
+      description,
+      portalBrokerCode,
+      brokerCode,
+      brokerId,
+    } = req.body;
 
     if (!name || !title || !description) {
       return res.status(400).json({
@@ -27,6 +36,9 @@ export async function createInquiry(req, res) {
       phone,
       title,
       description,
+      portalBrokerCode,
+      brokerCode,
+      brokerId,
       ip
     });
 

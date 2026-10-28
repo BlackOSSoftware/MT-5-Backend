@@ -1,14 +1,40 @@
+import mongoose from 'mongoose';
 import Inquiry from '../models/Inquiry.model.js';
+import Broker from '../models/Broker.model.js';
 import User from '../models/User.model.js';
 import { getUserBrokerId } from '../utils/brokerScope.js';
 
+async function resolveBrokerIdByCodeOrId(target) {
+  const value = String(target || '').trim();
+  if (!value) return null;
+  if (mongoose.isValidObjectId(value)) return value;
+  const byCode = await Broker.findOne({
+    code: value.toUpperCase(),
+    status: 'ACTIVE',
+  })
+    .select('_id')
+    .lean();
+  return byCode?._id ? String(byCode._id) : null;
+}
+
 /**
  * CREATE INQUIRY
- * Stamp brokerId from matching user email when possible.
+ * Priority: explicit brokerId / portalBrokerCode / brokerCode → matching user email.
+ * Oceana marketing site always sends portalBrokerCode=OCEANAPROFX so only that admin sees it.
  */
 export async function createInquiryService(payload) {
-  const email = String(payload?.email || '').trim().toLowerCase();
-  let brokerId = payload?.brokerId || null;
+  const {
+    portalBrokerCode = null,
+    brokerCode = null,
+    brokerId: payloadBrokerId = null,
+    ...inquiryFields
+  } = payload || {};
+
+  const email = String(inquiryFields?.email || '').trim().toLowerCase();
+  let brokerId =
+    (await resolveBrokerIdByCodeOrId(payloadBrokerId)) ||
+    (await resolveBrokerIdByCodeOrId(portalBrokerCode)) ||
+    (await resolveBrokerIdByCodeOrId(brokerCode));
 
   if (!brokerId && email) {
     const user = await User.findOne({ email })
@@ -22,30 +48,19 @@ export async function createInquiryService(payload) {
   }
 
   return Inquiry.create({
-    ...payload,
+    ...inquiryFields,
     ...(brokerId ? { brokerId } : {}),
   });
 }
 
 /**
  * GET INQUIRIES (ADMIN)
- * Broker admin: inquiries stamped to broker OR from their users' emails.
+ * Broker admin: only inquiries stamped to that broker (no cross-broker email leak).
  * SuperAdmin (brokerId null): all.
  */
 export async function getInquiriesService(page, limit, brokerId = null) {
   const skip = (page - 1) * limit;
-
-  let filter = {};
-  if (brokerId) {
-    const users = await User.find({ brokerId }).select('email').lean();
-    const emails = users.map((u) => u.email).filter(Boolean);
-    filter = {
-      $or: [
-        { brokerId },
-        ...(emails.length ? [{ email: { $in: emails } }] : []),
-      ],
-    };
-  }
+  const filter = brokerId ? { brokerId } : {};
 
   const data = await Inquiry.find(filter)
     .sort({ createdAt: -1 })
