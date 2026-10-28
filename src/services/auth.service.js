@@ -39,12 +39,32 @@ function normalizeHost(value) {
     .replace(/:\d+$/, "");
 }
 
+async function resolveBrokerIdByCodeOrId(target) {
+  const value = String(target || "").trim();
+  if (!value) return null;
+  if (mongoose.isValidObjectId(value)) return value;
+  const byCode = await Broker.findOne({
+    code: value.toUpperCase(),
+    status: "ACTIVE",
+  })
+    .select("_id")
+    .lean();
+  return byCode?._id ? String(byCode._id) : null;
+}
+
 /**
- * Map signup portal host → broker.
- * Priority: Broker.portalHosts → SIGNUP_HOST_BROKER_MAP → DEFAULT_BROKER_*
- * Example env: SIGNUP_HOST_BROKER_MAP=user.fptradess.com:BLACKOS,user.fptrades.com:BLACKOS
+ * Map signup portal → broker.
+ * Priority:
+ * 1) explicit portalBrokerCode / brokerCode (best for localhost multi-brand)
+ * 2) Broker.portalHosts
+ * 3) SIGNUP_HOST_BROKER_MAP
+ * 4) DEFAULT_BROKER_*
+ * Example env: SIGNUP_HOST_BROKER_MAP=user.fptradess.com:BLACKOS,user.oceanaprofx.com:OCEANAPROFX
  */
-async function resolveBrokerIdForPortalHost(portalHost) {
+async function resolveBrokerIdForPortalHost(portalHost, portalBrokerCode = null) {
+  const explicit = await resolveBrokerIdByCodeOrId(portalBrokerCode);
+  if (explicit) return explicit;
+
   const host = normalizeHost(portalHost);
   if (host) {
     const byPortal = await Broker.findOne({
@@ -60,13 +80,8 @@ async function resolveBrokerIdForPortalHost(portalHost) {
       const [mapHost, mapTarget] = part.split(":").map((s) => s.trim());
       if (!mapHost || !mapTarget) continue;
       if (normalizeHost(mapHost) !== host) continue;
-      if (mongoose.isValidObjectId(mapTarget)) return mapTarget;
-      const byCode = await Broker.findOne({
-        code: mapTarget.toUpperCase(),
-      })
-        .select("_id")
-        .lean();
-      if (byCode?._id) return String(byCode._id);
+      const mapped = await resolveBrokerIdByCodeOrId(mapTarget);
+      if (mapped) return mapped;
     }
   }
 
@@ -128,6 +143,8 @@ export async function signupService({
   signup_ip,
   referral_code,
   portalHost = null,
+  portalBrokerCode = null,
+  brokerCode = null,
 }) {
   if (!password || password !== confirmPassword) {
     throw new Error('Password and confirm password do not match');
@@ -135,7 +152,7 @@ export async function signupService({
 
   try {
     // Resolve broker before create:
-    // referral parent → portal host (user.fptradess.com) → DEFAULT_BROKER_*
+    // referral parent → explicit portalBrokerCode → portal host → DEFAULT_BROKER_*
     let referredBy = null;
     let brokerIdForUser = null;
     const referralCode =
@@ -156,7 +173,10 @@ export async function signupService({
       }
     }
     if (!brokerIdForUser) {
-      brokerIdForUser = await resolveBrokerIdForPortalHost(portalHost);
+      brokerIdForUser = await resolveBrokerIdForPortalHost(
+        portalHost,
+        portalBrokerCode || brokerCode
+      );
     }
 
     // 1️⃣ Create user (brokerId required for admin isolation)
