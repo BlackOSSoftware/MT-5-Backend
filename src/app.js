@@ -21,6 +21,9 @@ const staticOrigins = new Set([
   "https://admin.fptradess.com",
   "https://user.fptrades.com",
   "https://user.fptradess.com",
+  "https://user.oceanaprofx.com",
+  "https://admin.oceanaprofx.com",
+  "https://oceanaprofx.com",
 ]);
 
 function isLocalDevOrigin(origin) {
