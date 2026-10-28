@@ -209,7 +209,7 @@ export async function createAccount({
 
   /* ================= MAIL ================= */
 
-  const user = await User.findById(userId, { email: 1 }).lean();
+  const user = await User.findById(userId, { email: 1, brokerId: 1 }).lean();
 
   if (user?.email) {
     sendAccountCreatedMail({
@@ -219,6 +219,7 @@ export async function createAccount({
       planName: account.plan_name,
       tradePassword: tradePass,
       watchPassword: watchPass,
+      brokerId: account.brokerId || user.brokerId || null,
     }).catch(() => {});
   }
 

@@ -423,7 +423,7 @@ export async function resetTradePasswordService({
   }
 
   // optional email alert (no password inside unless auth was bootstrapped)
-  const user = await User.findById(userId, { email: 1 }).lean();
+  const user = await User.findById(userId, { email: 1, brokerId: 1 }).lean();
   if (user?.email) {
     sendAccountCreatedMail({
       email: user.email,
@@ -432,6 +432,7 @@ export async function resetTradePasswordService({
       planName: account.plan_name,
       tradePassword: "UPDATED BY USER",
       watchPassword: watchPasswordForMail,
+      brokerId: account.brokerId || user.brokerId || null,
     }).catch(() => {});
   }
 
@@ -501,7 +502,7 @@ export async function resetWatchPasswordService({
   }
 
   // optional email alert (no password inside unless auth was bootstrapped)
-  const user = await User.findById(userId, { email: 1 }).lean();
+  const user = await User.findById(userId, { email: 1, brokerId: 1 }).lean();
   if (user?.email) {
     sendAccountCreatedMail({
       email: user.email,
@@ -510,6 +511,7 @@ export async function resetWatchPasswordService({
       planName: account.plan_name,
       tradePassword: tradePasswordForMail,
       watchPassword: "UPDATED BY USER",
+      brokerId: account.brokerId || user.brokerId || null,
     }).catch(() => {});
   }
 
@@ -578,7 +580,7 @@ export async function adminResetTradePasswordService({
     );
   }
 
-  const user = await User.findById(account.user_id, { email: 1 }).lean();
+  const user = await User.findById(account.user_id, { email: 1, brokerId: 1 }).lean();
   if (user?.email) {
     sendAccountCreatedMail({
       email: user.email,
@@ -587,6 +589,7 @@ export async function adminResetTradePasswordService({
       planName: account.plan_name,
       tradePassword: newPassword,
       watchPassword: watchPasswordForMail,
+      brokerId: account.brokerId || user.brokerId || null,
     }).catch(() => {});
   }
 
@@ -655,7 +658,7 @@ export async function adminResetWatchPasswordService({
     );
   }
 
-  const user = await User.findById(account.user_id, { email: 1 }).lean();
+  const user = await User.findById(account.user_id, { email: 1, brokerId: 1 }).lean();
   if (user?.email) {
     sendAccountCreatedMail({
       email: user.email,
@@ -664,6 +667,7 @@ export async function adminResetWatchPasswordService({
       planName: account.plan_name,
       tradePassword: tradePasswordForMail,
       watchPassword: newPassword,
+      brokerId: account.brokerId || user.brokerId || null,
     }).catch(() => {});
   }
 

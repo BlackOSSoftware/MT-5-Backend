@@ -4,7 +4,12 @@ import Referral from '../models/Referral.model.js';
 import Account from '../models/Account.model.js';
 import Otp from '../models/Otp.model.js';
 import { hashPassword, comparePassword, randomToken, sha256 } from '../utils/hash.util.js';
-import { sendEmailVerificationMail, sendResetPasswordMail } from '../utils/mail.util.js';
+import {
+  sendEmailVerificationMail,
+  sendResetPasswordMail,
+  getFrontendUrlForBroker,
+  resolveBrokerCode,
+} from '../utils/mail.util.js';
 import { generateReferralCode } from '../utils/referralCode.util.js';
 import { signAccessToken } from '../utils/jwt.util.js';
 import UserDevice from '../models/UserDevice.model.js';
@@ -212,11 +217,16 @@ export async function signupService({
       status: 'PENDING'
     });
 
-    // 4️⃣ Send email confirmation link
-    sendEmailVerificationMail(
-      user.email,
-      `${process.env.FRONTEND_URL}/verify-email?token=${token}`
-    ).catch(err => {
+    // 4️⃣ Send email confirmation link (broker SMTP + portal URL)
+    (async () => {
+      const code = await resolveBrokerCode({ brokerId: brokerIdForUser });
+      const frontend = getFrontendUrlForBroker(code) || process.env.FRONTEND_URL;
+      await sendEmailVerificationMail(
+        user.email,
+        `${frontend}/verify-email?token=${token}`,
+        { brokerCode: code }
+      );
+    })().catch(err => {
       console.error('EMAIL SEND ERROR:', err);
     });
 
@@ -462,12 +472,16 @@ export async function forgotPasswordService(email) {
     }
   );
 
-  console.log('FRONTEND_URL =>', process.env.FRONTEND_URL);
-
-  sendResetPasswordMail(
-    user.email,
-    `${process.env.FRONTEND_URL}/reset-password?token=${token}`
-  ).catch(() => {});
+  (async () => {
+    const code = await resolveBrokerCode({ brokerId: user.brokerId });
+    const frontend = getFrontendUrlForBroker(code) || process.env.FRONTEND_URL;
+    console.log('FRONTEND_URL =>', frontend, 'broker =>', code);
+    await sendResetPasswordMail(
+      user.email,
+      `${frontend}/reset-password?token=${token}`,
+      { brokerCode: code }
+    );
+  })().catch(() => {});
 }
 
 /* ======================================================
@@ -569,7 +583,7 @@ export async function logoutService({ refreshToken }) {
 export async function resendEmailVerificationService(email) {
   const user = await User.findOne(
     { email: email.toLowerCase() },
-    { _id: 1, isMailVerified: 1 }
+    { _id: 1, isMailVerified: 1, brokerId: 1 }
   ).lean();
 
   if (!user) {
@@ -599,10 +613,15 @@ export async function resendEmailVerificationService(email) {
     }
   );
 
-  sendEmailVerificationMail(
-    email,
-    `${process.env.FRONTEND_URL}/verify-email?token=${token}`
-  ).catch(() => {});
+  (async () => {
+    const code = await resolveBrokerCode({ brokerId: user.brokerId });
+    const frontend = getFrontendUrlForBroker(code) || process.env.FRONTEND_URL;
+    await sendEmailVerificationMail(
+      email,
+      `${frontend}/verify-email?token=${token}`,
+      { brokerCode: code }
+    );
+  })().catch(() => {});
 
   return {
     user_id: user._id,
@@ -743,10 +762,15 @@ export async function adminSignupService({
     });
 
     if (!mailVerified && verifyToken) {
-      sendEmailVerificationMail(
-        user.email,
-        `${process.env.FRONTEND_URL}/verify-email?token=${verifyToken}`
-      ).catch(err => {
+      (async () => {
+        const code = await resolveBrokerCode({ brokerId: user.brokerId });
+        const frontend = getFrontendUrlForBroker(code) || process.env.FRONTEND_URL;
+        await sendEmailVerificationMail(
+          user.email,
+          `${frontend}/verify-email?token=${verifyToken}`,
+          { brokerCode: code }
+        );
+      })().catch(err => {
         console.error('EMAIL SEND ERROR:', err);
       });
     }
