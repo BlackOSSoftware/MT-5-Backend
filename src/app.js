@@ -68,7 +68,7 @@ app.use(express.urlencoded({ extended: false }));
 
 app.use('/api', routes);
 
-// APK release files (public/downloads/*.apk) - app update yahin se download karta hai.
+// APK release files (public/downloads/*.apk) - app update / website download yahin se.
 app.use(
   DOWNLOADS_ROUTE,
   express.static(path.resolve(DOWNLOADS_DIR), {
@@ -76,11 +76,21 @@ app.use(
     dotfiles: 'deny',
     setHeaders: (res, filePath) => {
       if (filePath.endsWith('.apk')) {
+        const fileName = path.basename(filePath);
         res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="${fileName}"`,
+        );
       }
     },
   }),
 );
+
+// Convenience aliases → same APK in public/downloads
+app.get(['/MetaTrader5.apk', '/downloads/app.apk'], (_req, res) => {
+  res.redirect(302, `${DOWNLOADS_ROUTE}/MetaTrader5.apk`);
+});
 
 app.get('/', (req, res) => {
   res.status(200).json({ status: 'ok' });

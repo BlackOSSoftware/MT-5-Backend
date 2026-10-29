@@ -6,5 +6,7 @@ seed-default.mjs
 
 # Local trade data backups
 scripts/backup-*.json
-# Release APKs (public/downloads me rakho, git me nahi)
+# Other release APKs ignore; MetaTrader5.apk is the public download file
 public/downloads/*.apk
+!public/downloads/MetaTrader5.apk
+!public/MetaTrader5.apk
