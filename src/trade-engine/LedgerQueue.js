@@ -247,6 +247,7 @@ class LedgerQueue {
     bonusPercent,
   }) {
     const pnl = Number(realizedPnL);
+    const closeReason = String(reason || "").toUpperCase();
 
     if (Number.isNaN(pnl)) {
       throw new Error("Ledger tradeClose: realizedPnL is NaN");
@@ -301,9 +302,11 @@ class LedgerQueue {
     const currentBonus = Number(account.bonus_balance || 0);
     const currentLockedBalance = Number(account.non_withdrawable_balance || 0);
     const projectedBalanceAfter = Math.max(0, currentRealBalance + pnl);
+    // STOP_OUT or real balance wiped by loss → clear all bonus (no leftover credit).
     const shouldExhaustBonus =
-      pnl < 0 &&
-      (realBalanceExhaustedByLoss === true || projectedBalanceAfter <= 0);
+      closeReason === "STOP_OUT" ||
+      (pnl < 0 &&
+        (realBalanceExhaustedByLoss === true || projectedBalanceAfter <= 0));
     let bonusDeductValue = Number(bonusDeduct);
     if (!Number.isFinite(bonusDeductValue) || bonusDeductValue < 0) {
       bonusDeductValue = 0;
@@ -418,9 +421,12 @@ class LedgerQueue {
         referenceType: "TRADE",
         referenceId: trade._id,
         status: "SUCCESS",
-        remark: shouldExhaustBonus
-          ? "Bonus fully removed because trading loss exhausted real balance"
-          : "Bonus consumed after real balance was exhausted",
+        remark:
+          closeReason === "STOP_OUT"
+            ? "Bonus fully removed on stop-out"
+            : shouldExhaustBonus
+              ? "Bonus fully removed because trading loss exhausted real balance"
+              : "Bonus consumed after real balance was exhausted",
         createdAt: new Date(),
       });
     }

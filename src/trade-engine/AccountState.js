@@ -7,11 +7,19 @@ export class AccountState {
     bonus_balance = 0,
     bonus_percent = 0,
     bonus_percent_override = null,
+    brokerId = null,
+    risk_warning_percent = null,
+    risk_stop_out_percent = null,
   }) {
     this.accountId = accountId;
 
     this.balance = Number(balance) || 0;
     this.leverage = Number(leverage) || 2000;
+    this.brokerId = brokerId ? String(brokerId) : null;
+    this.risk_warning_percent =
+      typeof risk_warning_percent === "number" ? risk_warning_percent : null;
+    this.risk_stop_out_percent =
+      typeof risk_stop_out_percent === "number" ? risk_stop_out_percent : null;
 
     this.bonus_balance = Number(bonus_balance) || 0;
     this.bonus_percent =

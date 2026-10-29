@@ -99,6 +99,7 @@ export async function bootstrapEngine({ accounts, symbols }) {
           : acc.bonus_percent_override === null
             ? null
             : undefined,
+      brokerId: acc.brokerId != null ? String(acc.brokerId) : undefined,
     });
   }
 

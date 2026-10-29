@@ -24,6 +24,14 @@ function fanoutPositionClosed(accountId, positionId, balance, bonusBalance) {
   });
 }
 
+/** UI bonus must follow floating equity (bonus_live), not stale full credit. */
+function liveBonusForUi(account) {
+  const live = Number(account?.bonus_live);
+  if (Number.isFinite(live)) return Number(live.toFixed(2));
+  const stored = Number(account?.bonus_balance);
+  return Number.isFinite(stored) ? Number(stored.toFixed(2)) : 0;
+}
+
 const DEBUG_LIVE = true;
 
 /** BTCUSD ↔ BTCUSDT, ETHUSD ↔ ETHUSDT, GOLD ↔ XAUUSD, … */
@@ -115,6 +123,9 @@ export class Engine {
     bonus_percent_override = undefined,
     status = undefined,
     account_type = undefined,
+    brokerId = undefined,
+    risk_warning_percent = undefined,
+    risk_stop_out_percent = undefined,
   }) {
     const id = String(accountId);
     if (!id || id === "undefined" || id === "null") {
@@ -162,6 +173,15 @@ export class Engine {
               : bonus_percent_override === null
                 ? null
                 : null,
+          brokerId: brokerId ?? null,
+          risk_warning_percent:
+            typeof risk_warning_percent === "number"
+              ? risk_warning_percent
+              : null,
+          risk_stop_out_percent:
+            typeof risk_stop_out_percent === "number"
+              ? risk_stop_out_percent
+              : null,
         });
 
     // base fields (preserve runtime state like positions/pendingOrders)
@@ -169,6 +189,19 @@ export class Engine {
     if (leverage !== undefined) acc.leverage = Number(leverage) || 2000;
     if (userId !== undefined) acc.userId = String(userId);
     if (lastIp !== undefined) acc.lastIp = lastIp;
+    if (brokerId !== undefined) {
+      acc.brokerId = brokerId ? String(brokerId) : null;
+    }
+    if (risk_warning_percent !== undefined) {
+      acc.risk_warning_percent =
+        typeof risk_warning_percent === "number" ? risk_warning_percent : null;
+    }
+    if (risk_stop_out_percent !== undefined) {
+      acc.risk_stop_out_percent =
+        typeof risk_stop_out_percent === "number"
+          ? risk_stop_out_percent
+          : null;
+    }
 
     // snapshot fields (safe to add directly)
     acc.commission_per_lot =
@@ -739,20 +772,13 @@ export class Engine {
 
     // Also emit account snapshot (balance may have changed due to commission)
     try {
+      const bonusUi = liveBonusForUi(account);
       engineEvents.emit("LIVE_ACCOUNT", {
         accountId: account.accountId,
         balance: Number(account.balance.toFixed(2)),
         equity: Number(account.equity.toFixed(2)),
-        bonusBalance: Number(
-          account.bonus_balance?.toFixed
-            ? account.bonus_balance.toFixed(2)
-            : account.bonus_balance || 0,
-        ),
-        bonusLive: Number(
-          account.bonus_live?.toFixed
-            ? account.bonus_live.toFixed(2)
-            : account.bonus_live || 0,
-        ),
+        bonusBalance: bonusUi,
+        bonusLive: bonusUi,
         bonusPercent: Number(
           account.bonus_percent?.toFixed
             ? account.bonus_percent.toFixed(2)
@@ -1442,20 +1468,13 @@ export class Engine {
       this.recalcUsedMargin(account);
 
       try {
+        const bonusUi = liveBonusForUi(account);
         engineEvents.emit("LIVE_ACCOUNT", {
           accountId: account.accountId,
           balance: Number(account.balance.toFixed(2)),
           equity: Number(account.equity.toFixed(2)),
-          bonusBalance: Number(
-            account.bonus_balance?.toFixed
-              ? account.bonus_balance.toFixed(2)
-              : account.bonus_balance || 0,
-          ),
-          bonusLive: Number(
-            account.bonus_live?.toFixed
-              ? account.bonus_live.toFixed(2)
-              : account.bonus_live || 0,
-          ),
+          bonusBalance: bonusUi,
+          bonusLive: bonusUi,
           bonusPercent: Number(
             account.bonus_percent?.toFixed
               ? account.bonus_percent.toFixed(2)
@@ -1522,16 +1541,25 @@ export class Engine {
     );
 
     let bonusDeduct = 0;
+    const closeReason = String(reason || "").toUpperCase();
     const realBalanceExhaustedByLoss =
       pos.floatingPnL < 0 && account.balance <= 0;
-    if (realBalanceExhaustedByLoss && bonusBalanceBeforeClose > 0) {
-      // A trading loss that exhausts the real balance also exhausts the
-      // remaining promotional credit. This prevents old credit from becoming
-      // usable again after a later deposit.
+
+    // STOP_OUT / capital wipe: leftover bonus must not survive (equity gone,
+    // bonus still showing was the bug). Always clear promotional credit.
+    if (closeReason === "STOP_OUT" && bonusBalanceBeforeClose > 0) {
+      bonusDeduct = bonusBalanceBeforeClose;
+      account.bonus_balance = 0;
+    } else if (realBalanceExhaustedByLoss && bonusBalanceBeforeClose > 0) {
+      // Loss exhausted real balance → wipe remaining bonus so it cannot be
+      // reused after a later deposit.
       bonusDeduct = bonusBalanceBeforeClose;
       account.bonus_balance = 0;
     } else if (pos.floatingPnL < 0) {
-      const overflowLoss = Math.max(0, Math.abs(pos.floatingPnL) - realBalanceBeforeClose);
+      const overflowLoss = Math.max(
+        0,
+        Math.abs(pos.floatingPnL) - realBalanceBeforeClose,
+      );
       if (overflowLoss > 0 && bonusBalanceBeforeClose > 0) {
         bonusDeduct = Math.min(bonusBalanceBeforeClose, overflowLoss);
         account.bonus_balance = Number(
@@ -1583,20 +1611,13 @@ export class Engine {
     }
 
     try {
+      const bonusUi = liveBonusForUi(account);
       engineEvents.emit("LIVE_ACCOUNT", {
         accountId: account.accountId,
         balance: Number(account.balance.toFixed(2)),
         equity: Number(account.equity.toFixed(2)),
-        bonusBalance: Number(
-          account.bonus_balance?.toFixed
-            ? account.bonus_balance.toFixed(2)
-            : account.bonus_balance || 0,
-        ),
-        bonusLive: Number(
-          account.bonus_live?.toFixed
-            ? account.bonus_live.toFixed(2)
-            : account.bonus_live || 0,
-        ),
+        bonusBalance: bonusUi,
+        bonusLive: bonusUi,
         bonusPercent: Number(
           account.bonus_percent?.toFixed
             ? account.bonus_percent.toFixed(2)
@@ -1648,6 +1669,55 @@ export class Engine {
       const sym = this.symbols.get(pos.symbol);
       if (!sym) continue;
       this.closePositionInternal(account, pos, "STOP_OUT", sym);
+    }
+
+    // Safety: if any position path left bonus behind, clear + persist.
+    const leftover = Number(account.bonus_balance) || 0;
+    if (leftover > 0) {
+      account.bonus_balance = 0;
+      account.bonus_live = 0;
+      this.recalcUsedMargin(account);
+      const bal = Number(account.balance) || 0;
+      const eq = Number(account.equity) || bal;
+      setImmediate(() => {
+        import("../models/Account.model.js")
+          .then(({ default: Account }) =>
+            Account.updateOne(
+              { _id: account.accountId },
+              { $set: { bonus_balance: 0, equity: eq } },
+            ),
+          )
+          .catch((err) =>
+            console.error(
+              "[ENGINE] stop-out leftover bonus DB clear failed:",
+              err?.message || err,
+            ),
+          );
+        import("./EngineSyncBus.js")
+          .then(({ publishAccountBalance }) =>
+            publishAccountBalance(account.accountId, bal, 0),
+          )
+          .catch(() => {});
+      });
+      try {
+        engineEvents.emit("LIVE_ACCOUNT", {
+          accountId: account.accountId,
+          balance: Number(bal.toFixed(2)),
+          equity: Number(eq.toFixed(2)),
+          bonusBalance: 0,
+          bonusLive: 0,
+          bonusPercent: Number(account.bonus_percent || 0),
+          usedMargin: Number(account.usedMargin.toFixed(2)),
+          freeMargin: Number(account.freeMargin.toFixed(2)),
+          marginLevel: Number(
+            (
+              account.usedMargin > 0
+                ? (account.equity / account.usedMargin) * 100
+                : 0
+            ).toFixed(2),
+          ),
+        });
+      } catch (_) {}
     }
   }
 

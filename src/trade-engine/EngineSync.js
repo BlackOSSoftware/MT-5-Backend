@@ -45,6 +45,8 @@ class EngineSync {
           : snapshot.bonus_percent_override === null
             ? null
             : undefined,
+      brokerId:
+        snapshot.brokerId != null ? String(snapshot.brokerId) : undefined,
 
       account_type: snapshot.account_type,
       status: snapshot.status,
@@ -322,6 +324,7 @@ class EngineSync {
             : acc.bonus_percent_override === null
               ? null
               : undefined,
+        brokerId: acc.brokerId != null ? String(acc.brokerId) : undefined,
 
         account_type: acc.account_type,
         status: acc.status,

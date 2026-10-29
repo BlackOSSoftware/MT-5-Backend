@@ -71,6 +71,16 @@ async function bootstrapTradeEngine() {
     console.warn("[BONUS] settings preload failed:", err?.message || err);
   }
 
+  try {
+    const { warmRiskSettingsCache } = await import(
+      "./services/brokerRisk.service.js"
+    );
+    const n = await warmRiskSettingsCache();
+    console.log("[RISK] broker risk settings warmed:", n);
+  } catch (err) {
+    console.warn("[RISK] settings preload failed:", err?.message || err);
+  }
+
   console.log("[BOOTSTRAP] loading accounts + symbols...");
   const accounts = await Account.find(
     { status: "active" },
@@ -83,6 +93,7 @@ async function bootstrapTradeEngine() {
       spread_enabled: 1,
       bonus_balance: 1,
       bonus_percent_override: 1,
+      brokerId: 1,
     },
   ).lean();
 
