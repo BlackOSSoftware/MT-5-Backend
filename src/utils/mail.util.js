@@ -55,9 +55,13 @@ function brandForBrokerCode(brokerCode) {
         "",
     };
   }
+  // BLACKOS / DEFAULT / FPTrade — prefer broker-specific live portal URL
   return {
     appName: process.env.APP_NAME || process.env.APP_NAME_BLACKOS || "FP Trades",
-    frontendUrl: process.env.FRONTEND_URL || "",
+    frontendUrl:
+      process.env.FRONTEND_URL_BLACKOS ||
+      process.env.FRONTEND_URL ||
+      "",
   };
 }
 
