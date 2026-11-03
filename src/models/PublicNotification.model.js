@@ -18,6 +18,14 @@ const publicNotificationSchema = new mongoose.Schema(
       default: {}
     },
 
+    // null = broadcast to all; set = targeted push to one portal user
+    user_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
+
     isActive: {
       type: Boolean,
       default: true

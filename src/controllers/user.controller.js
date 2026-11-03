@@ -72,7 +72,7 @@ export async function saveFcmToken(req, res) {
     }
 
     const userId = req.user._id;
-    const { token } = req.body;
+    const { token, platform } = req.body;
 
     if (!token) {
       return res.status(400).json({
@@ -81,13 +81,15 @@ export async function saveFcmToken(req, res) {
       });
     }
 
+    const plat = String(platform || 'android').trim().toLowerCase() || 'android';
+
     await UserDevice.findOneAndUpdate(
-      { fcm_token: token },   // 🔥 token unique hai, best filter
+      { fcm_token: token },
       {
-        user_id: userId,      // ✅ schema ke according
+        user_id: userId,
         fcm_token: token,
-        platform: "web",
-        last_used_at: new Date(), // ✅ schema ke according
+        platform: plat,
+        last_used_at: new Date(),
       },
       { upsert: true, new: true }
     );
