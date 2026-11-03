@@ -224,13 +224,9 @@ export async function forgotPassword(req, res) {
     });
   } catch (e) {
     console.error('forgotPassword failed:', e?.message || e);
-    const raw = String(e?.message || '');
-    const message = /535|restricted/i.test(raw)
-      ? 'Unable to send reset email right now. Please try again later or contact support.'
-      : raw || 'Failed to send reset email';
     return res.status(400).json({
       success: false,
-      message,
+      message: e.message || 'Failed to send reset email'
     });
   }
 }

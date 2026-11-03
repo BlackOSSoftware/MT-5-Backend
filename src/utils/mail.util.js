@@ -66,29 +66,12 @@ function brandForBrokerCode(brokerCode) {
 
 function buildSmtpConfig(brokerCode) {
   const code = String(brokerCode || "DEFAULT").trim().toUpperCase() || "DEFAULT";
-  let host = smtpEnv(code, "HOST");
-  let port = Number(smtpEnv(code, "PORT") || 465);
-  let user = smtpEnv(code, "USER");
-  let pass = smtpEnv(code, "PASS");
-  let from = smtpEnv(code, "FROM");
-  let secureRaw = smtpEnv(code, "SECURE");
-
-  // Oceana SMTP missing → use platform SMTP so reset/verify mail still sends.
-  if ((!host || !user || !pass) && code === "OCEANAPROFX") {
-    console.warn(
-      "[MAIL] SMTP_OCEANAPROFX_* missing — falling back to default SMTP_*"
-    );
-    host = process.env.SMTP_HOST || "";
-    port = Number(process.env.SMTP_PORT || 465);
-    user = process.env.SMTP_USER || "";
-    pass = process.env.SMTP_PASS || "";
-    from =
-      process.env.SMTP_OCEANAPROFX_FROM ||
-      process.env.SMTP_FROM_OCEANAPROFX ||
-      "Oceana Pro FX <" + (process.env.SMTP_USER || "noreply@oceanaprofx.com") + ">";
-    secureRaw = process.env.SMTP_SECURE;
-  }
-
+  const host = smtpEnv(code, "HOST");
+  const port = Number(smtpEnv(code, "PORT") || 465);
+  const user = smtpEnv(code, "USER");
+  const pass = smtpEnv(code, "PASS");
+  const from = smtpEnv(code, "FROM");
+  const secureRaw = smtpEnv(code, "SECURE");
   const secure =
     secureRaw != null && String(secureRaw).trim() !== ""
       ? String(secureRaw).toLowerCase() === "true"
@@ -155,70 +138,19 @@ function loadTemplate(fileName, variables) {
    GENERIC SEND
 ====================================================== */
 
-function defaultSmtpCfg() {
-  const host = process.env.SMTP_HOST || "";
-  const port = Number(process.env.SMTP_PORT || 465);
-  const user = process.env.SMTP_USER || "";
-  const pass = process.env.SMTP_PASS || "";
-  const from = process.env.SMTP_FROM || user;
-  const secureRaw = process.env.SMTP_SECURE;
-  const secure =
-    secureRaw != null && String(secureRaw).trim() !== ""
-      ? String(secureRaw).toLowerCase() === "true"
-      : port === 465;
-  return { host, port, user, pass, from, secure, brokerCode: "DEFAULT" };
-}
-
-function isMailboxRestrictedError(err) {
-  const msg = String(err?.response || err?.message || err || "");
-  return /535|restricted|mailbox unavailable|sender address rejected/i.test(msg);
-}
-
 async function sendMail({ to, subject, html, brokerCode = null }) {
-  const code = String(brokerCode || "")
-    .trim()
-    .toUpperCase();
   const { transporter, cfg } = getTransporter(brokerCode);
   if (!cfg.host || !cfg.user || !cfg.pass) {
     throw new Error(
       `SMTP not configured for broker ${cfg.brokerCode || "DEFAULT"}`
     );
   }
-
-  try {
-    return await transporter.sendMail({
-      from: cfg.from || cfg.user,
-      to,
-      subject,
-      html,
-      ...(code === "OCEANAPROFX"
-        ? { replyTo: process.env.SMTP_OCEANAPROFX_USER || undefined }
-        : {}),
-    });
-  } catch (err) {
-    // GoDaddy often locks info@oceanaprofx.com ("User has been restricted").
-    // Fall back to platform SMTP so reset/verify mail still reaches the user.
-    if (code === "OCEANAPROFX" && isMailboxRestrictedError(err)) {
-      const fallback = defaultSmtpCfg();
-      if (!fallback.host || !fallback.user || !fallback.pass) {
-        throw err;
-      }
-      console.warn(
-        "[MAIL] Oceana SMTP restricted — falling back to default SMTP for",
-        to,
-        String(err?.response || err?.message || err),
-      );
-      const { transporter: fbTransporter } = getTransporter("BLACKOS");
-      return fbTransporter.sendMail({
-        from: fallback.from || fallback.user,
-        to,
-        subject,
-        html,
-        replyTo: process.env.SMTP_OCEANAPROFX_USER || undefined,
-      });
-    }
-    throw err;
-  }
+  return transporter.sendMail({
+    from: cfg.from || cfg.user,
+    to,
+    subject,
+    html,
+  });
 }
 
 export async function sendEmailVerificationMail(
