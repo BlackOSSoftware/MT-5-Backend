@@ -39,7 +39,7 @@ export async function updateMyProfile(req, res) {
     if (!profile) {
       return res.status(500).json({
         success: false,
-        message: 'Failed to update profile, '
+        message: 'Failed to update profile'
       });
     }
 
@@ -49,9 +49,15 @@ export async function updateMyProfile(req, res) {
       data: profile
     });
   } catch (err) {
-    return res.status(500).json({
+    const status = err.statusCode || (err.code === 11000 ? 400 : 500);
+    const message =
+      err.code === 11000
+        ? 'Phone number already in use'
+        : err.message || 'Internal server error';
+    console.error('updateMyProfile error:', err);
+    return res.status(status).json({
       success: false,
-      message: 'Internal server error',
+      message,
       error: err.message
     });
   }

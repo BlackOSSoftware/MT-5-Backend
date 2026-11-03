@@ -1,5 +1,15 @@
 import express from "express";
-import { accountLoginController, refreshAccountSessionController, getAccountProfileController, resetTradePasswordController, resetWatchPasswordController, adminResetTradePasswordController, adminResetWatchPasswordController } from "../../controllers/accountAuth.controller.js";
+import {
+  accountLoginController,
+  refreshAccountSessionController,
+  getAccountProfileController,
+  resetTradePasswordController,
+  resetWatchPasswordController,
+  adminResetTradePasswordController,
+  adminResetWatchPasswordController,
+  activateOwnedAccountController,
+  activatePrimaryOwnedAccountController,
+} from "../../controllers/accountAuth.controller.js";
 import { accountAuthMiddleware } from "../../middlewares/accountAuth.middleware.js";
 import { changeAccountPasswordService } from "../../services/accountPassword.service.js";
 
@@ -27,6 +37,10 @@ const router = express.Router();
 
 router.post("/login", accountLoginController);
 router.post("/refresh", refreshAccountSessionController);
+/** Email-user JWT → mint TRADE session for an owned account */
+router.post("/activate", authMiddleware, activateOwnedAccountController);
+router.post("/activate-primary", authMiddleware, activatePrimaryOwnedAccountController);
+router.post("/switch", authMiddleware, activateOwnedAccountController);
 router.get("/me", accountAuthMiddleware, getAccountProfileController);
 // MT5 app: master / investor / trader / money manager password change
 router.post("/change-password", accountAuthMiddleware, changeAccountPasswordController);

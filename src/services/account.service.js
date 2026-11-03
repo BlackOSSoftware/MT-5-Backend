@@ -28,11 +28,24 @@ const DEMO_DEFAULT_BALANCE = 10000;
 /* =====================================================
    CREATE ACCOUNT
 ===================================================== */
+function isStrongPassword(password) {
+  if (typeof password !== "string" || password.length < 8) return false;
+  return (
+    /[A-Z]/.test(password) &&
+    /[a-z]/.test(password) &&
+    /\d/.test(password) &&
+    /[!@#$%^&*]/.test(password)
+  );
+}
+
 export async function createAccount({
   userId,
   account_plan_id,
   account_type,
   opening_balance,
+  leverage: requestedLeverage,
+  trade_password,
+  watch_password,
 }) {
   if (!userId) throw new Error("User not authenticated");
 
@@ -106,10 +119,22 @@ export async function createAccount({
 
   /* ================= CONFIG ================= */
 
-  const leverage =
+  const planMax =
     typeof plan.max_leverage === "number" && plan.max_leverage > 0
       ? plan.max_leverage
       : 2000;
+
+  let leverage = planMax;
+  if (requestedLeverage !== undefined && requestedLeverage !== null && requestedLeverage !== "") {
+    const lev = Number(requestedLeverage);
+    if (!Number.isFinite(lev) || lev < 1) {
+      throw new Error("Invalid leverage");
+    }
+    if (lev > planMax) {
+      throw new Error(`Max leverage: ${planMax}`);
+    }
+    leverage = Math.floor(lev);
+  }
 
   if (leverage <= 0) throw new Error("Invalid leverage");
 
@@ -124,10 +149,33 @@ export async function createAccount({
 
   /* ================= PASSWORD ================= */
 
-  const tradePass = generateStrongPassword(12);
-  let watchPass = generateStrongPassword(12);
-  while (watchPass === tradePass) {
+  let tradePass =
+    typeof trade_password === "string" ? trade_password.trim() : "";
+  let watchPass =
+    typeof watch_password === "string" ? watch_password.trim() : "";
+
+  if (tradePass || watchPass) {
+    if (!tradePass) throw new Error("Master password is required");
+    if (!isStrongPassword(tradePass)) {
+      throw new Error(
+        "Master password must be min 8 chars with uppercase, lowercase, numbers, and special character (!@#$%^&*)"
+      );
+    }
+    if (!watchPass) {
+      watchPass = `${tradePass}${Math.floor(Math.random() * 90 + 10)}`;
+    }
+    if (watchPass === tradePass) {
+      throw new Error("Investor password and trading password cannot be the same");
+    }
+    if (watchPass.length < 8) {
+      throw new Error("Investor password must be at least 8 characters");
+    }
+  } else {
+    tradePass = generateStrongPassword(12);
     watchPass = generateStrongPassword(12);
+    while (watchPass === tradePass) {
+      watchPass = generateStrongPassword(12);
+    }
   }
 
   const tradeHash = await hashPassword(tradePass);
@@ -153,6 +201,11 @@ export async function createAccount({
   /* ================= CREATE ================= */
 
   const ownerBrokerId = userBrokerId;
+
+  const existingCount = await Account.countDocuments({
+    user_id: userId,
+    status: "active",
+  });
 
   const account = await Account.create({
     user_id: userId,
@@ -188,6 +241,8 @@ export async function createAccount({
     currency: plan.currency || "USD",
 
     status: "active",
+    // First active account becomes primary for email login.
+    is_primary: existingCount === 0,
   });
 
   /* ================= AUTH ================= */
@@ -246,6 +301,8 @@ export async function createAccount({
     swap_enabled: account.swap_enabled,
     swap_charge: account.swap_charge,
 
+    is_primary: Boolean(account.is_primary),
+
     trade_password: tradePass,
     watch_password: watchPass,
   };
@@ -276,19 +333,83 @@ export async function getUserAccounts(userId) {
       bonus_percent_override: 1,
       currency: 1,
       status: 1,
+      is_primary: 1,
 
       createdAt: 1,
     },
   )
-    .sort({ createdAt: -1 })
+    .sort({ is_primary: -1, createdAt: -1 })
     .lean()
     .then((items) =>
       items.map((account) => ({
         ...account,
+        is_primary: Boolean(account.is_primary),
         total_balance:
           Number(account.balance || 0) + Number(account.bonus_balance || 0),
       }))
     );
+}
+
+/** Resolve which account email-login should open. */
+export async function resolvePrimaryAccount(userId) {
+  if (!userId) return null;
+
+  const primary = await Account.findOne({
+    user_id: userId,
+    status: "active",
+    is_primary: true,
+  }).lean();
+  if (primary) return primary;
+
+  const active = await Account.find({ user_id: userId, status: "active" })
+    .sort({ createdAt: 1 })
+    .lean();
+  if (!active.length) return null;
+
+  // Prefer live, else first (often sole demo).
+  const live = active.find((a) => a.account_type === "live");
+  const chosen = live || active[0];
+
+  // Heal: mark as primary so next login is stable.
+  await Account.updateMany(
+    { user_id: userId },
+    { $set: { is_primary: false } },
+  );
+  await Account.updateOne(
+    { _id: chosen._id },
+    { $set: { is_primary: true } },
+  );
+  return { ...chosen, is_primary: true };
+}
+
+export async function setPrimaryAccountService({ userId, accountId }) {
+  if (!userId || !accountId) throw new Error("Invalid request");
+
+  const account = await Account.findOne({
+    _id: accountId,
+    user_id: userId,
+    status: "active",
+  }).lean();
+  if (!account) {
+    const err = new Error("Account not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  await Account.updateMany(
+    { user_id: userId },
+    { $set: { is_primary: false } },
+  );
+  await Account.updateOne(
+    { _id: account._id },
+    { $set: { is_primary: true } },
+  );
+
+  return {
+    accountId: String(account._id),
+    account_number: account.account_number,
+    is_primary: true,
+  };
 }
 
 /* =====================================================

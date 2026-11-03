@@ -177,11 +177,15 @@ export async function getActivePlans(brokerId = null) {
   const key = cacheKeyForBroker(brokerId);
   const start = process.hrtime.bigint();
 
-  const cached = await redis.get(key);
-  if (cached) {
-    const end = process.hrtime.bigint();
-    console.log("REDIS HIT |", Number(end - start) / 1_000_000, "ms", key);
-    return JSON.parse(cached);
+  try {
+    const cached = await redis.get(key);
+    if (cached) {
+      const end = process.hrtime.bigint();
+      console.log("REDIS HIT |", Number(end - start) / 1_000_000, "ms", key);
+      return JSON.parse(cached);
+    }
+  } catch (err) {
+    console.warn("REDIS GET skip:", err?.message || err);
   }
 
   console.log("REDIS MISS", key);
@@ -193,7 +197,11 @@ export async function getActivePlans(brokerId = null) {
     .sort({ createdAt: -1 })
     .lean();
 
-  await redis.set(key, JSON.stringify(plans), "EX", CACHE_TTL);
+  try {
+    await redis.set(key, JSON.stringify(plans), "EX", CACHE_TTL);
+  } catch (err) {
+    console.warn("REDIS SET skip:", err?.message || err);
+  }
   return plans;
 }
 

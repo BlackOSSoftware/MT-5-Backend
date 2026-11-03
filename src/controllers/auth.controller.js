@@ -208,15 +208,25 @@ export async function login(req, res) {
 
 export async function forgotPassword(req, res) {
   try {
-    await forgotPasswordService(req.body.email);
+    const email = req.body?.email;
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
 
-    res.json({
-      success: true
+    await forgotPasswordService(email);
+
+    return res.json({
+      success: true,
+      message: 'Reset link sent to your email successfully'
     });
   } catch (e) {
-    res.status(400).json({
+    console.error('forgotPassword failed:', e?.message || e);
+    return res.status(400).json({
       success: false,
-      message: e.message
+      message: e.message || 'Failed to send reset email'
     });
   }
 }

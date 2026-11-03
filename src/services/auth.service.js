@@ -453,11 +453,22 @@ export async function loginService({
 ====================================================== */
 
 export async function forgotPasswordService(email) {
-  const user = await User.findOne({ email: email.toLowerCase() }).lean();
-  if (!user) return;
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) {
+    throw new Error('Email is required');
+  }
+
+  const user = await User.findOne({ email: normalized }).lean();
+  // Always look successful to the client (no email enumeration),
+  // but still send when the user exists.
+  if (!user) {
+    return { sent: false };
+  }
 
   const auth = await Auth.findOne({ user_id: user._id });
-  if (!auth) return;
+  if (!auth) {
+    return { sent: false };
+  }
 
   const token = randomToken();
 
@@ -467,22 +478,22 @@ export async function forgotPasswordService(email) {
       $set: {
         reset_token_hash: sha256(token),
         reset_token_expires_at: new Date(
-          Date.now() + 10 * 60 * 1000
+          Date.now() + 30 * 60 * 1000
         )
       }
     }
   );
 
-  (async () => {
-    const code = await resolveBrokerCode({ brokerId: user.brokerId });
-    const frontend = getFrontendUrlForBroker(code) || process.env.FRONTEND_URL;
-    console.log('FRONTEND_URL =>', frontend, 'broker =>', code);
-    await sendResetPasswordMail(
-      user.email,
-      `${frontend}/reset-password?token=${token}`,
-      { brokerCode: code }
-    );
-  })().catch(() => {});
+  const code = await resolveBrokerCode({ brokerId: user.brokerId });
+  const frontend =
+    getFrontendUrlForBroker(code) ||
+    process.env.FRONTEND_URL ||
+    'https://user.oceanaprofx.com';
+  const resetLink = `${String(frontend).replace(/\/$/, '')}/reset-password?token=${token}`;
+  console.log('FRONTEND_URL =>', frontend, 'broker =>', code, 'to =>', user.email);
+
+  await sendResetPasswordMail(user.email, resetLink, { brokerCode: code });
+  return { sent: true };
 }
 
 /* ======================================================

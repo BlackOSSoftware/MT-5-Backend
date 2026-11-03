@@ -4,6 +4,7 @@ import {
   getUserAccountDetail,
   resetDemoAccount,
   setAccountLeverage,
+  setPrimaryAccountService,
   adminListUserAccounts,
   adminSearchAccounts,
   adminUpdateAccountService,
@@ -22,7 +23,12 @@ export async function createAccountController(req, res) {
     const {
       account_plan_id,
       account_type,
-      opening_balance
+      opening_balance,
+      leverage,
+      trade_password,
+      watch_password,
+      master_password,
+      investor_password,
     } = req.body;
 
     if (!account_plan_id || !account_type ) {
@@ -36,7 +42,10 @@ export async function createAccountController(req, res) {
       userId: req.user._id,
       account_plan_id,
       account_type,
-      opening_balance
+      opening_balance,
+      leverage,
+      trade_password: trade_password || master_password,
+      watch_password: watch_password || investor_password,
     });
 
     return res.status(201).json({
@@ -58,6 +67,37 @@ export async function getMyAccounts(req, res) {
     res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+}
+
+export async function setPrimaryAccountController(req, res) {
+  try {
+    if (!req.user?._id) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    const accountId = req.params.id || req.body?.accountId || req.body?.account_id;
+    if (!accountId) {
+      return res.status(400).json({
+        success: false,
+        message: "accountId is required",
+      });
+    }
+
+    const data = await setPrimaryAccountService({
+      userId: req.user._id,
+      accountId: String(accountId).trim(),
+    });
+
+    return res.json({
+      success: true,
+      message: "Primary account updated",
+      data,
+    });
+  } catch (err) {
+    return res.status(err.statusCode || 400).json({
+      success: false,
+      message: err.message,
+    });
   }
 }
 

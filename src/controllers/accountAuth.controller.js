@@ -6,6 +6,8 @@ import {
   resetWatchPasswordService,
   adminResetTradePasswordService,
   adminResetWatchPasswordService,
+  activateOwnedAccountService,
+  activatePrimaryOwnedAccountService,
 } from "../services/accountAuth.service.js";
 
 /* =====================================================
@@ -200,5 +202,68 @@ export async function adminResetWatchPasswordController(req, res) {
     return res.json(result);
   } catch (err) {
     return res.status(400).json({ message: err.message });
+  }
+}
+
+/* =====================================================
+   ACTIVATE / SWITCH owned trading account (user JWT)
+===================================================== */
+export async function activateOwnedAccountController(req, res) {
+  try {
+    if (!req.user?._id) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const { accountId, account_id, tradePassword, fcmToken } = req.body || {};
+    const id = accountId || account_id;
+    if (!id) {
+      return res.status(400).json({ message: "accountId is required" });
+    }
+
+    const result = await activateOwnedAccountService({
+      userId: req.user._id,
+      accountId: String(id).trim(),
+      tradePassword:
+        typeof tradePassword === "string" && tradePassword.trim()
+          ? tradePassword.trim()
+          : undefined,
+      ip: req.ip,
+      device: req.headers["user-agent"] || "unknown",
+      fcmToken,
+    });
+
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      message: err.message || "Unable to activate account",
+    });
+  }
+}
+
+/** Email login → open primary trading account (no picker). */
+export async function activatePrimaryOwnedAccountController(req, res) {
+  try {
+    if (!req.user?._id) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const { tradePassword, fcmToken } = req.body || {};
+
+    const result = await activatePrimaryOwnedAccountService({
+      userId: req.user._id,
+      tradePassword:
+        typeof tradePassword === "string" && tradePassword.trim()
+          ? tradePassword.trim()
+          : undefined,
+      ip: req.ip,
+      device: req.headers["user-agent"] || "unknown",
+      fcmToken,
+    });
+
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      message: err.message || "Unable to activate primary account",
+    });
   }
 }

@@ -161,6 +161,13 @@ const AccountSchema = new mongoose.Schema(
       default: "active",
       index: true,
     },
+
+    /** App email-login opens this account by default (one per user). */
+    is_primary: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -171,5 +178,6 @@ const AccountSchema = new mongoose.Schema(
 // INDEXES
 AccountSchema.index({ user_id: 1, account_type: 1 });
 AccountSchema.index({ user_id: 1, status: 1 });
+AccountSchema.index({ user_id: 1, is_primary: 1 });
 
 export default mongoose.model("Account", AccountSchema);

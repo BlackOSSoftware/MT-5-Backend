@@ -53,7 +53,19 @@ export const getPlansAdmin = async (req, res) => {
 
 export const getPlansForUser = async (req, res) => {
   try {
-    const brokerId = req.user?.brokerId || null;
+    let brokerId = req.user?.brokerId || null;
+    // Portal users without brokerId still need white-label plans
+    // (Oceana / default broker) — never return an empty list silently.
+    if (!brokerId) {
+      const Broker = (await import("../models/Broker.model.js")).default;
+      const code = String(
+        process.env.DEFAULT_BROKER_CODE || "OCEANAPROFX",
+      )
+        .trim()
+        .toUpperCase();
+      const broker = await Broker.findOne({ code }).select("_id").lean();
+      brokerId = broker?._id || null;
+    }
     const plans = await getActivePlans(brokerId);
     return res.json({ success: true, data: plans });
   } catch (err) {

@@ -51,8 +51,7 @@ function brandForBrokerCode(brokerCode) {
       appName: process.env.APP_NAME_OCEANAPROFX || "Oceana Pro FX",
       frontendUrl:
         process.env.FRONTEND_URL_OCEANAPROFX ||
-        process.env.FRONTEND_URL ||
-        "",
+        "https://user.oceanaprofx.com",
     };
   }
   // BLACKOS / DEFAULT / FPTrade — prefer broker-specific live portal URL
@@ -67,12 +66,29 @@ function brandForBrokerCode(brokerCode) {
 
 function buildSmtpConfig(brokerCode) {
   const code = String(brokerCode || "DEFAULT").trim().toUpperCase() || "DEFAULT";
-  const host = smtpEnv(code, "HOST");
-  const port = Number(smtpEnv(code, "PORT") || 465);
-  const user = smtpEnv(code, "USER");
-  const pass = smtpEnv(code, "PASS");
-  const from = smtpEnv(code, "FROM");
-  const secureRaw = smtpEnv(code, "SECURE");
+  let host = smtpEnv(code, "HOST");
+  let port = Number(smtpEnv(code, "PORT") || 465);
+  let user = smtpEnv(code, "USER");
+  let pass = smtpEnv(code, "PASS");
+  let from = smtpEnv(code, "FROM");
+  let secureRaw = smtpEnv(code, "SECURE");
+
+  // Oceana SMTP missing → use platform SMTP so reset/verify mail still sends.
+  if ((!host || !user || !pass) && code === "OCEANAPROFX") {
+    console.warn(
+      "[MAIL] SMTP_OCEANAPROFX_* missing — falling back to default SMTP_*"
+    );
+    host = process.env.SMTP_HOST || "";
+    port = Number(process.env.SMTP_PORT || 465);
+    user = process.env.SMTP_USER || "";
+    pass = process.env.SMTP_PASS || "";
+    from =
+      process.env.SMTP_OCEANAPROFX_FROM ||
+      process.env.SMTP_FROM_OCEANAPROFX ||
+      "Oceana Pro FX <" + (process.env.SMTP_USER || "noreply@oceanaprofx.com") + ">";
+    secureRaw = process.env.SMTP_SECURE;
+  }
+
   const secure =
     secureRaw != null && String(secureRaw).trim() !== ""
       ? String(secureRaw).toLowerCase() === "true"

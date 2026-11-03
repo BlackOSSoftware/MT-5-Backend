@@ -8,6 +8,7 @@ import {
   getMyAccountDetail,
   resetDemoAccountController,
   setAccountLeverageController,
+  setPrimaryAccountController,
   adminListUserAccountsController,
   adminSearchAccountsController,
   adminUpdateAccountController,
@@ -21,6 +22,7 @@ router.get("/", authMiddleware, getMyAccounts);
 router.get("/single/:id", authMiddleware, getMyAccountDetail);
 router.post("/:id/reset-demo", authMiddleware, resetDemoAccountController);
 router.post("/:id/set-leverage", authMiddleware, setAccountLeverageController);
+router.post("/:id/set-primary", authMiddleware, setPrimaryAccountController);
 router.get("/admin/user/:userId", brokerAdminAuth, adminListUserAccountsController);
 router.get("/admin/search", brokerAdminAuth, adminSearchAccountsController);
 router.patch("/admin/:accountId", brokerAdminAuth, adminUpdateAccountController);

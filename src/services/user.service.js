@@ -117,32 +117,109 @@ export async function updateMyProfileService(userId, payload = {}) {
   console.log('USER ID =>', userId);
   console.log('PAYLOAD =>', payload);
 
-  const allowedData = {
-    date_of_birth: payload.date_of_birth ?? null,
-    gender: payload.gender ?? null,
-    address_line_1: payload.address_line_1 ?? '',
-    address_line_2: payload.address_line_2 ?? '',
-    city: payload.city ?? '',
-    state: payload.state ?? '',
-    country: payload.country ?? '',
-    pincode: payload.pincode ?? ''
-  };
+  const uid = mongoose.Types.ObjectId.isValid(userId)
+    ? new mongoose.Types.ObjectId(userId)
+    : userId;
+
+  // Phone lives on User; rest on UserProfile.
+  if (payload.phone !== undefined) {
+    const phone = String(payload.phone || '').trim();
+    // Empty → unset (sparse unique index rejects multiple "")
+    if (!phone) {
+      await User.findByIdAndUpdate(uid, { $unset: { phone: 1 } });
+    } else {
+      const taken = await User.findOne({
+        phone,
+        _id: { $ne: uid },
+      })
+        .select('_id')
+        .lean();
+      if (taken) {
+        const err = new Error('Phone number already in use');
+        err.statusCode = 400;
+        throw err;
+      }
+      try {
+        await User.findByIdAndUpdate(uid, { $set: { phone } });
+      } catch (e) {
+        if (e && (e.code === 11000 || String(e.message || '').includes('E11000'))) {
+          const err = new Error('Phone number already in use');
+          err.statusCode = 400;
+          throw err;
+        }
+        throw e;
+      }
+    }
+  }
+  if (payload.name !== undefined) {
+    const name = String(payload.name || '').trim();
+    if (name) await User.findByIdAndUpdate(uid, { $set: { name } });
+  }
+
+  const allowedData = {};
+
+  if (payload.date_of_birth !== undefined) {
+    const raw = payload.date_of_birth;
+    if (raw === null || raw === '') {
+      allowedData.date_of_birth = null;
+    } else {
+      const d = new Date(raw);
+      if (Number.isNaN(d.getTime())) {
+        const err = new Error('Invalid date of birth');
+        err.statusCode = 400;
+        throw err;
+      }
+      allowedData.date_of_birth = d;
+    }
+  }
+
+  if (payload.gender !== undefined) {
+    if (payload.gender === null || payload.gender === '') {
+      allowedData.gender = null;
+    } else {
+      const g = String(payload.gender).trim().toUpperCase();
+      if (!['MALE', 'FEMALE', 'OTHER'].includes(g)) {
+        const err = new Error('Invalid gender');
+        err.statusCode = 400;
+        throw err;
+      }
+      allowedData.gender = g;
+    }
+  }
+
+  for (const key of [
+    'address_line_1',
+    'address_line_2',
+    'city',
+    'state',
+    'country',
+    'pincode',
+  ]) {
+    if (payload[key] !== undefined) {
+      allowedData[key] = String(payload[key] ?? '').trim();
+    }
+  }
 
   console.log('ALLOWED DATA =>', allowedData);
 
-  const profile = await UserProfile.findOneAndUpdate(
-    { user_id: userId },
-    { $set: allowedData },
-    {
-      new: true,
-      upsert: true,
-      lean: true
-    }
-  );
+  if (Object.keys(allowedData).length > 0) {
+    await UserProfile.findOneAndUpdate(
+      { user_id: uid },
+      {
+        $set: allowedData,
+        $setOnInsert: { user_id: uid },
+      },
+      {
+        new: true,
+        upsert: true,
+        lean: true,
+        runValidators: true,
+      }
+    );
+  }
 
-  console.log('UPDATED PROFILE =>', profile);
-
-  return profile;
+  // Return full /me shape so clients can refresh progress.
+  return getMyProfileService(uid);
 }
 
 export async function adminUpdateUserService(userId, payload = {}) {

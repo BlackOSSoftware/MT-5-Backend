@@ -69,15 +69,18 @@ export async function getUserTransactionHistoryService({
     .lean();
 
   const transactions = transactionsRaw.map((tx) => {
-    const isPopulatedAccount = tx.account && typeof tx.account === "object";
+    const isPopulatedAccount =
+      tx.account && typeof tx.account === "object" && !Array.isArray(tx.account);
     const accountIdValue = isPopulatedAccount ? tx.account._id : tx.account;
-    const accountNumber = isPopulatedAccount ? tx.account.account_number : null;
+    const accountNumber = isPopulatedAccount
+      ? String(tx.account.account_number || "").trim() || null
+      : null;
 
     return {
       ...tx,
       account: accountIdValue,
       accountId: accountIdValue,
-      accountNumber
+      accountNumber,
     };
   });
 

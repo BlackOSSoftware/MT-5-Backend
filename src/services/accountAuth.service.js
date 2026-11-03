@@ -3,6 +3,7 @@ import Account from "../models/Account.model.js";
 import AccountAuth from "../models/AccountAuth.model.js";
 import Broker from "../models/Broker.model.js";
 import User from "../models/User.model.js";
+import { resolvePrimaryAccount } from "./account.service.js";
 
 import { comparePassword, sha256, hashPassword } from "../utils/hash.util.js";
 import {
@@ -672,4 +673,144 @@ export async function adminResetWatchPasswordService({
   }
 
   return { message: "Watch password updated successfully" };
+}
+
+/* =====================================================
+   ACTIVATE / SWITCH (email-user JWT → account TRADE JWT)
+   Ownership only: account.user_id must match JWT user.
+   Optional tradePassword = step-up; without it TRADE still
+   issued after verified email login.
+===================================================== */
+async function issueTradeSessionForAccount(account, { ip, device, fcmToken }) {
+  let auth = await findAccountAuthForAccount(
+    account,
+    "+trade_password_hash +watch_password_hash",
+  );
+
+  if (!auth) {
+    // Distinct random hashes — never same trade/watch secret.
+    auth = await createMissingAccountAuth(account, {
+      tradeHash: await hashPassword(generateStrongPassword(24)),
+      watchHash: await hashPassword(generateStrongPassword(24)),
+    });
+  }
+
+  if (auth.is_locked) {
+    throw new Error("Account is locked");
+  }
+
+  const tokenPayload = {
+    accountId: account._id.toString(),
+    userId: account.user_id.toString(),
+    account_number: account.account_number,
+    sessionType: "TRADE",
+  };
+
+  const tradeToken = signAccountToken(tokenPayload);
+  const refreshToken = signAccountRefreshToken(tokenPayload);
+
+  await AccountAuth.updateOne(
+    { _id: auth._id },
+    {
+      $set: {
+        login_attempts: 0,
+        last_login_at: new Date(),
+        last_login_ip: ip || null,
+        last_login_device: device || null,
+        fcm_token: fcmToken || null,
+        access_token_hash: sha256(tradeToken),
+        access_token_expires_at: new Date(Date.now() + 15 * 60 * 1000),
+        refresh_token_hash: sha256(refreshToken),
+        refresh_token_expires_at: new Date(
+          Date.now() + 30 * 24 * 60 * 60 * 1000,
+        ),
+      },
+    },
+  );
+
+  const owner = await User.findById(account.user_id)
+    .select("name email brokerId")
+    .lean();
+  const brand = await resolveBrokerBrand(account, owner);
+
+  return {
+    tradeToken,
+    refreshToken,
+    sessionType: "TRADE",
+    accountId: account._id.toString(),
+    account_number: account.account_number,
+    account_type: account.account_type,
+    name: owner?.name || "",
+    email: owner?.email || "",
+    brokerCode: brand.brokerCode,
+    brokerDisplayName: brand.brokerDisplayName,
+  };
+}
+
+export async function activateOwnedAccountService({
+  userId,
+  accountId,
+  tradePassword,
+  ip,
+  device,
+  fcmToken,
+}) {
+  if (!userId || !accountId) {
+    throw new Error("Invalid request");
+  }
+
+  const account = await findActiveAccount(accountId, {
+    user_id: userId,
+  });
+
+  if (!account) {
+    throw new Error("Account not found or not owned by this user");
+  }
+
+  if (tradePassword) {
+    const auth = await findAccountAuthForAccount(
+      account,
+      "+trade_password_hash +watch_password_hash",
+    );
+    if (!auth || auth.is_locked) {
+      throw new Error("Account auth not found or locked");
+    }
+    const tradeOk =
+      Boolean(auth.trade_password_hash) &&
+      (await comparePassword(tradePassword, auth.trade_password_hash));
+    if (!tradeOk) {
+      await AccountAuth.updateOne(
+        { _id: auth._id },
+        { $inc: { login_attempts: 1 } },
+      );
+      throw new Error("Invalid trade password");
+    }
+  }
+
+  return issueTradeSessionForAccount(account, { ip, device, fcmToken });
+}
+
+/** Email login: open primary (or sole / preferred) account — no picker. */
+export async function activatePrimaryOwnedAccountService({
+  userId,
+  tradePassword,
+  ip,
+  device,
+  fcmToken,
+}) {
+  if (!userId) throw new Error("Invalid request");
+
+  const account = await resolvePrimaryAccount(userId);
+  if (!account) {
+    throw new Error("No trading account found for this user");
+  }
+
+  return activateOwnedAccountService({
+    userId,
+    accountId: String(account._id),
+    tradePassword,
+    ip,
+    device,
+    fcmToken,
+  });
 }
