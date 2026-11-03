@@ -155,19 +155,70 @@ function loadTemplate(fileName, variables) {
    GENERIC SEND
 ====================================================== */
 
+function defaultSmtpCfg() {
+  const host = process.env.SMTP_HOST || "";
+  const port = Number(process.env.SMTP_PORT || 465);
+  const user = process.env.SMTP_USER || "";
+  const pass = process.env.SMTP_PASS || "";
+  const from = process.env.SMTP_FROM || user;
+  const secureRaw = process.env.SMTP_SECURE;
+  const secure =
+    secureRaw != null && String(secureRaw).trim() !== ""
+      ? String(secureRaw).toLowerCase() === "true"
+      : port === 465;
+  return { host, port, user, pass, from, secure, brokerCode: "DEFAULT" };
+}
+
+function isMailboxRestrictedError(err) {
+  const msg = String(err?.response || err?.message || err || "");
+  return /535|restricted|mailbox unavailable|sender address rejected/i.test(msg);
+}
+
 async function sendMail({ to, subject, html, brokerCode = null }) {
+  const code = String(brokerCode || "")
+    .trim()
+    .toUpperCase();
   const { transporter, cfg } = getTransporter(brokerCode);
   if (!cfg.host || !cfg.user || !cfg.pass) {
     throw new Error(
       `SMTP not configured for broker ${cfg.brokerCode || "DEFAULT"}`
     );
   }
-  return transporter.sendMail({
-    from: cfg.from || cfg.user,
-    to,
-    subject,
-    html,
-  });
+
+  try {
+    return await transporter.sendMail({
+      from: cfg.from || cfg.user,
+      to,
+      subject,
+      html,
+      ...(code === "OCEANAPROFX"
+        ? { replyTo: process.env.SMTP_OCEANAPROFX_USER || undefined }
+        : {}),
+    });
+  } catch (err) {
+    // GoDaddy often locks info@oceanaprofx.com ("User has been restricted").
+    // Fall back to platform SMTP so reset/verify mail still reaches the user.
+    if (code === "OCEANAPROFX" && isMailboxRestrictedError(err)) {
+      const fallback = defaultSmtpCfg();
+      if (!fallback.host || !fallback.user || !fallback.pass) {
+        throw err;
+      }
+      console.warn(
+        "[MAIL] Oceana SMTP restricted — falling back to default SMTP for",
+        to,
+        String(err?.response || err?.message || err),
+      );
+      const { transporter: fbTransporter } = getTransporter("BLACKOS");
+      return fbTransporter.sendMail({
+        from: fallback.from || fallback.user,
+        to,
+        subject,
+        html,
+        replyTo: process.env.SMTP_OCEANAPROFX_USER || undefined,
+      });
+    }
+    throw err;
+  }
 }
 
 export async function sendEmailVerificationMail(
