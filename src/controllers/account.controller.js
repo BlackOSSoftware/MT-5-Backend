@@ -1,6 +1,7 @@
 import {
   createAccount,
   getUserAccounts,
+  getUserTodayLots,
   getUserAccountDetail,
   resetDemoAccount,
   setAccountLeverage,
@@ -67,6 +68,18 @@ export async function getMyAccounts(req, res) {
     res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+}
+
+export async function getMyTodayLots(req, res) {
+  try {
+    if (!req.user?._id) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    const data = await getUserTodayLots(req.user._id);
+    return res.json({ success: true, data });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
   }
 }
 

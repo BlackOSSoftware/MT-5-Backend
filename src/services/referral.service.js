@@ -71,6 +71,11 @@ export async function getReferralSummaryService(userId) {
   }
 
   const referral = await ensureReferralProfile(userId);
+  try {
+    await syncMissingReferralRewardsForReferrer(userId);
+  } catch {
+    /* non-fatal */
+  }
   return buildReferralSummaryPayload(userId, referral);
 }
 
@@ -104,6 +109,12 @@ export async function listReferralRewardsService({
 }) {
   if (!mongoose.isValidObjectId(userId)) {
     throw new Error("Invalid userId");
+  }
+
+  try {
+    await syncMissingReferralRewardsForReferrer(userId);
+  } catch {
+    /* non-fatal backfill */
   }
 
   const safePage = Math.max(Number(page) || 1, 1);
@@ -273,6 +284,10 @@ export async function listMyDirectReferralsService({
   };
 }
 
+/**
+ * Portal Request Payout: instantly credit reward as bonus_balance (credit)
+ * on the referrer's selected live account. No admin wait.
+ */
 export async function requestReferralRewardService({
   userId,
   rewardId,
@@ -288,39 +303,130 @@ export async function requestReferralRewardService({
     throw new Error("Invalid accountId");
   }
 
-  const account = await Account.findOne({
-    _id: accountId,
-    user_id: userId,
-    status: "active",
-  })
-    .select("_id account_type")
-    .lean();
+  const session = await mongoose.startSession();
+  let result = null;
 
-  if (!account) {
-    throw new Error("Account not found");
+  try {
+    await session.withTransaction(async () => {
+      const account = await Account.findOne({
+        _id: accountId,
+        user_id: userId,
+        status: "active",
+      }).session(session);
+
+      if (!account) {
+        throw new Error("Account not found");
+      }
+      if (account.account_type !== "live") {
+        throw new Error("Referral reward can be credited only to a live account");
+      }
+
+      const reward = await ReferralReward.findOne({
+        _id: rewardId,
+        referrer_user: userId,
+        status: "ELIGIBLE",
+      }).session(session);
+
+      if (!reward) {
+        throw new Error("Referral reward is not eligible for payout");
+      }
+
+      const amount = Number(reward.reward_amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error("Invalid reward amount");
+      }
+
+      const nextBonus = Number(account.bonus_balance || 0) + amount;
+      const nextGranted = Number(account.bonus_granted || 0) + amount;
+      const nextEquity = Number(account.balance || 0) + nextBonus;
+
+      await Account.updateOne(
+        { _id: account._id },
+        {
+          $set: {
+            bonus_balance: nextBonus,
+            bonus_granted: nextGranted,
+            equity: nextEquity,
+          },
+        },
+        { session },
+      );
+
+      await Transaction.create(
+        [
+          {
+            user: userId,
+            account: account._id,
+            type: "BONUS_CREDIT_IN",
+            amount,
+            balanceAfter: Number(account.balance || 0),
+            equityAfter: nextEquity,
+            status: "SUCCESS",
+            referenceType: "SYSTEM",
+            referenceId: reward._id,
+            createdBy: userId,
+            remark: "Referral payout credited as bonus",
+          },
+        ],
+        { session },
+      );
+
+      await Referral.updateOne(
+        { user_id: userId },
+        {
+          $inc: {
+            total_earned: amount,
+          },
+        },
+        { session, upsert: true },
+      );
+
+      await Referral.updateOne(
+        { user_id: reward.referred_user },
+        { $set: { status: "CONFIRMED" } },
+        { session },
+      );
+
+      reward.status = "APPROVED";
+      reward.requested_account = accountId;
+      reward.requested_at = new Date();
+      reward.approved_at = new Date();
+      reward.approved_by = userId;
+      await reward.save({ session });
+
+      result = {
+        rewardId: reward._id,
+        accountId: account._id,
+        amount,
+        bonusBalance: nextBonus,
+        equity: nextEquity,
+        status: "APPROVED",
+        message: "Referral payout credited as bonus credit",
+      };
+    });
+  } finally {
+    session.endSession();
   }
 
-  if (account.account_type !== "live") {
-    throw new Error("Referral reward can be credited only to a live account");
+  if (result?.accountId) {
+    try {
+      const acc = await Account.findById(result.accountId)
+        .select("balance")
+        .lean();
+      if (acc) {
+        publishAccountBalance(String(result.accountId), Number(acc.balance || 0));
+      }
+      // Reload account into engine so bonus_balance is applied.
+      await EngineSync.syncAccount(String(result.accountId));
+    } catch (err) {
+      console.error(
+        "[REFERRAL] EngineSync after payout failed",
+        err?.message || err,
+      );
+    }
   }
 
-  const updated = await ReferralReward.findOneAndUpdate(
-    { _id: rewardId, referrer_user: userId, status: "ELIGIBLE" },
-    {
-      $set: {
-        requested_account: accountId,
-        requested_at: new Date(),
-        status: "REQUESTED",
-      },
-    },
-    { new: true },
-  ).lean();
-
-  if (!updated) {
-    throw new Error("Referral reward is not eligible for request");
-  }
-
-  return updated;
+  return result;
 }
 
 export async function adminListReferralRewardsService({
@@ -531,13 +637,21 @@ export async function adminApproveReferralRewardService({
         throw new Error("Requested account not found or inactive");
       }
 
-      const newBalance = Number(account.balance) + amount;
-      const newEquity =
-        Number(newBalance) + Number(account.bonus_balance || 0);
+      // Credit as bonus / credit (not withdrawable cash balance).
+      const nextBonus = Number(account.bonus_balance || 0) + amount;
+      const nextGranted = Number(account.bonus_granted || 0) + amount;
+      const newBalance = Number(account.balance || 0);
+      const newEquity = newBalance + nextBonus;
 
       await Account.updateOne(
         { _id: account._id },
-        { $set: { balance: newBalance, equity: newEquity } },
+        {
+          $set: {
+            bonus_balance: nextBonus,
+            bonus_granted: nextGranted,
+            equity: newEquity,
+          },
+        },
         { session },
       );
 
@@ -546,7 +660,7 @@ export async function adminApproveReferralRewardService({
           {
             user: reward.referrer_user,
             account: account._id,
-            type: "REFERRAL",
+            type: "BONUS_CREDIT_IN",
             amount,
             balanceAfter: newBalance,
             equityAfter: newEquity,
@@ -554,7 +668,7 @@ export async function adminApproveReferralRewardService({
             referenceType: "SYSTEM",
             referenceId: reward._id,
             createdBy: adminId,
-            remark: "Referral reward approved",
+            remark: "Referral reward approved (bonus credit)",
           },
         ],
         { session },
@@ -564,9 +678,7 @@ export async function adminApproveReferralRewardService({
         { user_id: reward.referrer_user },
         {
           $inc: {
-            total_referrals: 1,
             total_earned: amount,
-            referral_balance: amount,
           },
         },
         { session, upsert: true },
@@ -594,13 +706,13 @@ export async function adminApproveReferralRewardService({
     session.endSession();
   }
 
-  if (result?.accountId && Number.isFinite(result?.newBalance)) {
+  if (result?.accountId) {
     try {
-      publishAccountBalance(String(result.accountId), result.newBalance);
-      await EngineSync.updateBalance(String(result.accountId), result.newBalance);
+      publishAccountBalance(String(result.accountId), Number(result.newBalance || 0));
+      await EngineSync.syncAccount(String(result.accountId));
     } catch (err) {
       console.error(
-        "[REFERRAL] EngineSync.updateBalance failed (approve)",
+        "[REFERRAL] EngineSync after admin approve failed",
         err?.message || err,
       );
     }
@@ -662,10 +774,10 @@ export async function createReferralRewardEligibility({
   referredUserId,
   referredAccountId,
   planId,
-  depositId,
+  depositId = null,
   session = null,
 }) {
-  if (!referredUserId || !referredAccountId || !planId || !depositId) return;
+  if (!referredUserId || !referredAccountId || !planId) return;
 
   const referral = await Referral.findOne({
     user_id: referredUserId,
@@ -693,11 +805,48 @@ export async function createReferralRewardEligibility({
         referrer_user: referral.referred_by,
         referred_account: referredAccountId,
         plan_id: planId,
-        deposit_id: depositId,
+        ...(depositId ? { deposit_id: depositId } : {}),
         reward_amount: rewardAmount,
         status: "ELIGIBLE",
       },
     },
     { upsert: true, session },
   );
+}
+
+/**
+ * Backfill: if referred users already opened live accounts with a plan reward
+ * but no ReferralReward row exists yet, create ELIGIBLE rows for the referrer.
+ */
+export async function syncMissingReferralRewardsForReferrer(referrerUserId) {
+  if (!mongoose.isValidObjectId(referrerUserId)) return;
+
+  const directs = await Referral.find({ referred_by: referrerUserId })
+    .select("user_id")
+    .lean();
+
+  for (const row of directs) {
+    const referredUserId = row.user_id;
+    if (!referredUserId) continue;
+
+    const exists = await ReferralReward.exists({ referred_user: referredUserId });
+    if (exists) continue;
+
+    const liveAcc = await Account.findOne({
+      user_id: referredUserId,
+      account_type: "live",
+      status: "active",
+    })
+      .sort({ createdAt: 1 })
+      .select("_id account_plan_id")
+      .lean();
+
+    if (!liveAcc?.account_plan_id) continue;
+
+    await createReferralRewardEligibility({
+      referredUserId,
+      referredAccountId: liveAcc._id,
+      planId: liveAcc.account_plan_id,
+    });
+  }
 }

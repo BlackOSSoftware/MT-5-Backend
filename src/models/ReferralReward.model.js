@@ -34,10 +34,11 @@ const ReferralRewardSchema = new mongoose.Schema(
       required: true,
     },
 
+    // Optional: first deposit trigger. Live-account open can also create eligibility.
     deposit_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Deposit",
-      required: true,
+      default: null,
       index: true,
     },
 

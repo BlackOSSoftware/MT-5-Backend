@@ -8,6 +8,7 @@ import {
   adminApproveReferralRewardService,
   adminRejectReferralRewardService,
 } from "../services/referral.service.js";
+import { getReferralDashboardService } from "../services/referralDashboard.service.js";
 import {
   adminGetReferralTreeService,
   adminListReferralLinksService,
@@ -20,6 +21,22 @@ import { assertUserBelongsToBroker } from "../utils/brokerScope.js";
 export async function getMyReferralSummary(req, res) {
   try {
     const data = await getReferralSummaryService(req.user._id);
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function getMyReferralDashboard(req, res) {
+  try {
+    const { scope, period, from, to } = req.query;
+    const data = await getReferralDashboardService({
+      userId: req.user._id,
+      scope,
+      period,
+      from,
+      to,
+    });
     return res.status(200).json({ success: true, data });
   } catch (err) {
     return res.status(400).json({ success: false, message: err.message });

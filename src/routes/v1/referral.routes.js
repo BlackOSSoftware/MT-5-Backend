@@ -3,6 +3,7 @@ import { authMiddleware } from "../../middlewares/auth.middleware.js";
 import { brokerAdminAuth } from "../../middlewares/brokerAuth.middleware.js";
 import {
   getMyReferralSummary,
+  getMyReferralDashboard,
   listMyReferralRewards,
   listMyDirectReferrals,
   requestReferralReward,
@@ -20,6 +21,7 @@ const router = express.Router();
 
 // User routes
 router.get("/summary", authMiddleware, getMyReferralSummary);
+router.get("/dashboard", authMiddleware, getMyReferralDashboard);
 router.get("/rewards", authMiddleware, listMyReferralRewards);
 router.get("/mine", authMiddleware, listMyDirectReferrals);
 router.post("/request", authMiddleware, requestReferralReward);

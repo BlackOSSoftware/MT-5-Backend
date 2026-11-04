@@ -138,7 +138,14 @@ function loadTemplate(fileName, variables) {
    GENERIC SEND
 ====================================================== */
 
-async function sendMail({ to, subject, html, brokerCode = null }) {
+async function sendMail({
+  to,
+  subject,
+  html,
+  brokerCode = null,
+  replyTo = null,
+  headers = null,
+}) {
   const { transporter, cfg } = getTransporter(brokerCode);
   if (!cfg.host || !cfg.user || !cfg.pass) {
     throw new Error(
@@ -150,6 +157,8 @@ async function sendMail({ to, subject, html, brokerCode = null }) {
     to,
     subject,
     html,
+    ...(replyTo ? { replyTo } : {}),
+    ...(headers ? { headers } : {}),
   });
 }
 
@@ -222,5 +231,58 @@ export async function sendAccountCreatedMail({
     subject: "Your Trading Account is Ready",
     html,
     brokerCode: code,
+  });
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Automated ticket confirmation (do-not-reply style).
+ * Uses broker SMTP (Oceana → SMTP_OCEANAPROFX_*).
+ */
+export async function sendTicketReceivedMail({
+  email,
+  name,
+  ticketId,
+  title,
+  description,
+  brokerCode = null,
+  brokerId = null,
+}) {
+  const code = await resolveBrokerCode({ brokerCode, brokerId });
+  const brand = brandForBrokerCode(code);
+  const html = loadTemplate("ticket-received.html", {
+    APP_NAME: brand.appName,
+    USER_NAME: escapeHtml(name || "Trader"),
+    TICKET_ID: escapeHtml(ticketId),
+    TICKET_TITLE: escapeHtml(title),
+    TICKET_DESCRIPTION: escapeHtml(description),
+    YEAR: new Date().getFullYear(),
+  });
+
+  const replyTo =
+    code === "OCEANAPROFX"
+      ? "noreply@oceanaprofx.com"
+      : "noreply@fptradess.com";
+
+  return sendMail({
+    to: email,
+    subject: `[${brand.appName}] Ticket received — ${ticketId}`,
+    html,
+    brokerCode: code,
+    // Discourage replies; copy in body says do not reply.
+    replyTo,
+    headers: {
+      "Auto-Submitted": "auto-generated",
+      "X-Auto-Response-Suppress": "All",
+      Precedence: "bulk",
+    },
   });
 }

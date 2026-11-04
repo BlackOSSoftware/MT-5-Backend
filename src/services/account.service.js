@@ -18,6 +18,7 @@ import {
   publishAccountRemove,
 } from "../trade-engine/EngineSyncBus.js";
 
+import { createReferralRewardEligibility } from "./referral.service.js";
 import { sendAccountCreatedMail } from "../utils/mail.util.js";
 import { generateAccountNumber } from "../utils/accountNumber.util.js";
 import { generateStrongPassword } from "../utils/accountNumber.util.js";
@@ -265,6 +266,24 @@ export async function createAccount({
   await EngineSync.onAccountCreated(account._id);
   publishAccountSnapshot(account);
 
+  /* ================= REFERRAL REWARD (LIVE ONLY) ================= */
+  // When a referred user opens a live account, create ELIGIBLE reward for referrer
+  // based on plan.referral_reward_amount (e.g. $30).
+  if (account_type === "live") {
+    try {
+      await createReferralRewardEligibility({
+        referredUserId: userId,
+        referredAccountId: account._id,
+        planId: plan._id,
+      });
+    } catch (err) {
+      console.error(
+        "[ACCOUNT] referral eligibility failed",
+        err?.message || err,
+      );
+    }
+  }
+
   /* ================= MAIL ================= */
 
   const user = await User.findById(userId, { email: 1, brokerId: 1 }).lean();
@@ -348,6 +367,54 @@ export async function getUserAccounts(userId) {
           Number(account.balance || 0) + Number(account.bonus_balance || 0),
       }))
     );
+}
+
+/**
+ * Today's lots for portal dashboard:
+ * closed today + currently open (all user accounts).
+ */
+export async function getUserTodayLots(userId) {
+  if (!userId) throw new Error("User not authenticated");
+
+  const uid =
+    userId instanceof mongoose.Types.ObjectId
+      ? userId
+      : new mongoose.Types.ObjectId(String(userId));
+
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+
+  const [closedAgg, openAgg] = await Promise.all([
+    Trade.aggregate([
+      {
+        $match: {
+          userId: uid,
+          status: "CLOSED",
+          closeTime: { $gte: start },
+        },
+      },
+      { $group: { _id: null, total: { $sum: "$volume" } } },
+    ]),
+    Trade.aggregate([
+      {
+        $match: {
+          userId: uid,
+          status: { $in: ["OPEN", "CLOSING"] },
+        },
+      },
+      { $group: { _id: null, total: { $sum: "$volume" } } },
+    ]),
+  ]);
+
+  const closedToday = Number(closedAgg[0]?.total || 0);
+  const openNow = Number(openAgg[0]?.total || 0);
+  const totalLots = closedToday + openNow;
+
+  return {
+    todayLots: Number(totalLots.toFixed(2)),
+    closedToday: Number(closedToday.toFixed(2)),
+    openLots: Number(openNow.toFixed(2)),
+  };
 }
 
 /** Resolve which account email-login should open. */

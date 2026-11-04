@@ -5,6 +5,7 @@ import { brokerAdminAuth } from "../../middlewares/brokerAuth.middleware.js";
 import {
   createAccountController,
   getMyAccounts,
+  getMyTodayLots,
   getMyAccountDetail,
   resetDemoAccountController,
   setAccountLeverageController,
@@ -19,6 +20,7 @@ const router = express.Router();
 
 router.post("/", authMiddleware, createAccountController);
 router.get("/", authMiddleware, getMyAccounts);
+router.get("/stats/today-lots", authMiddleware, getMyTodayLots);
 router.get("/single/:id", authMiddleware, getMyAccountDetail);
 router.post("/:id/reset-demo", authMiddleware, resetDemoAccountController);
 router.post("/:id/set-leverage", authMiddleware, setAccountLeverageController);

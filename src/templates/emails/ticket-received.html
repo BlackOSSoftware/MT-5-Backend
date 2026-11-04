@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{APP_NAME}} - Ticket Received</title>
+  </head>
+
+  <body style="margin:0;padding:0;background:#0b1220;font-family:Arial,Helvetica,sans-serif;">
+    <div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#0b1220;opacity:0;">
+      We received your {{APP_NAME}} support ticket {{TICKET_ID}}.
+    </div>
+
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#0b1220;">
+      <tr>
+        <td align="center" style="padding:50px 16px;">
+          <table width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 12px 32px rgba(8,12,24,0.35);">
+
+            <tr>
+              <td style="background:linear-gradient(135deg,#0b1220 0%,#0f2a4a 55%,#1b4f8a 100%);padding:28px 36px;">
+                <div style="font-size:13px;letter-spacing:3px;text-transform:uppercase;color:#9fb2c8;">
+                  Support Ticket
+                </div>
+                <h1 style="margin:8px 0 0 0;color:#ffffff;font-size:28px;line-height:1.2;">
+                  {{APP_NAME}}
+                </h1>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:36px;color:#0f172a;">
+                <h2 style="margin:0 0 14px 0;color:#0b1c2d;font-size:22px;">
+                  We've received your ticket
+                </h2>
+
+                <p style="font-size:16px;line-height:1.7;margin:0 0 18px 0;color:#1f2937;">
+                  Hi {{USER_NAME}},
+                </p>
+
+                <p style="font-size:16px;line-height:1.7;margin:0 0 18px 0;color:#1f2937;">
+                  Thank you for contacting {{APP_NAME}}. Your support ticket has been submitted successfully. Our team will review it and get back to you as soon as possible.
+                </p>
+
+                <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:16px 18px;margin:0 0 18px 0;">
+                  <p style="margin:0 0 8px 0;font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:0.6px;">
+                    Ticket ID
+                  </p>
+                  <p style="margin:0 0 14px 0;font-size:18px;font-weight:700;color:#0b1c2d;">
+                    {{TICKET_ID}}
+                  </p>
+
+                  <p style="margin:0 0 8px 0;font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:0.6px;">
+                    Subject
+                  </p>
+                  <p style="margin:0 0 14px 0;font-size:15px;font-weight:600;color:#0b1c2d;">
+                    {{TICKET_TITLE}}
+                  </p>
+
+                  <p style="margin:0 0 8px 0;font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:0.6px;">
+                    Message
+                  </p>
+                  <p style="margin:0;font-size:14px;line-height:1.6;color:#334155;white-space:pre-wrap;">
+                    {{TICKET_DESCRIPTION}}
+                  </p>
+                </div>
+
+                <p style="font-size:15px;line-height:1.7;margin:0 0 18px 0;color:#1f2937;">
+                  We will contact you shortly on this email address. Please keep your ticket ID handy for faster support.
+                </p>
+
+                <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:14px 16px;">
+                  <p style="font-size:13px;color:#9a3412;line-height:1.6;margin:0;">
+                    <b>Do not reply to this email.</b> This is an automated confirmation from {{APP_NAME}}. Replies to this message are not monitored.
+                  </p>
+                </div>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="background:linear-gradient(135deg,#0b1220 0%,#0f2741 100%);padding:18px 36px;color:#a3b3c7;font-size:12px;line-height:1.6;">
+                © {{YEAR}} {{APP_NAME}}. All rights reserved.<br />
+                This is an automated no-reply message.
+              </td>
+            </tr>
+
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

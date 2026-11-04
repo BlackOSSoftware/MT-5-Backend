@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 
+const INQUIRY_STATUSES = ['OPEN', 'REVIEWED', 'CLOSED'];
+
 const inquirySchema = new mongoose.Schema(
   {
     name: {
@@ -36,6 +38,46 @@ const inquirySchema = new mongoose.Schema(
       required: true
     },
 
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
+
+    status: {
+      type: String,
+      enum: INQUIRY_STATUSES,
+      default: 'OPEN',
+      index: true,
+    },
+
+    adminNote: {
+      type: String,
+      trim: true,
+      maxlength: 2000,
+      default: '',
+    },
+
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    reviewedAt: {
+      type: Date,
+      default: null,
+    },
+    closedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    closedAt: {
+      type: Date,
+      default: null,
+    },
+
     brokerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Broker',
@@ -48,9 +90,8 @@ const inquirySchema = new mongoose.Schema(
   }
 );
 
-/**
- * Indexes for fast pagination & sorting
- */
 inquirySchema.index({ createdAt: -1 });
+inquirySchema.index({ email: 1, createdAt: -1 });
 
+export const INQUIRY_STATUS_LIST = INQUIRY_STATUSES;
 export default mongoose.model('Inquiry', inquirySchema);
