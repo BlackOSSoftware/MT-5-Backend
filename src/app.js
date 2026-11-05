@@ -25,7 +25,11 @@ const staticOrigins = new Set([
   "https://user.oceanaprofx.com",
   "https://admin.oceanaprofx.com",
   "https://oceanaprofx.com",
+  "https://www.oceanaprofx.com",
 ]);
+
+// Any https origin on our own brand domains (apex, www, user, admin, ...).
+const BRAND_ORIGIN_RE = /^https:\/\/([a-z0-9-]+\.)*(oceanaprofx\.com|fptrades\.com|fptradess\.com)$/i;
 
 function isLocalDevOrigin(origin) {
   if (!origin) return false;
@@ -43,7 +47,7 @@ function isLocalDevOrigin(origin) {
 app.use(
   cors({
     origin(origin, cb) {
-      if (!origin || staticOrigins.has(origin) || isLocalDevOrigin(origin)) {
+      if (!origin || staticOrigins.has(origin) || BRAND_ORIGIN_RE.test(origin) || isLocalDevOrigin(origin)) {
         return cb(null, true);
       }
       return cb(null, false);

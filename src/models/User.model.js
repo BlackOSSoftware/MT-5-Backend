@@ -77,6 +77,12 @@ const userSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+
+    // IB dashboard access for brokers that gate it (see utils/ibAccess.js); set by the broker admin.
+    ibDashboardEnabled: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true

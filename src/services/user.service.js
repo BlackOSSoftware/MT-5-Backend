@@ -17,6 +17,7 @@ import Deposit from '../models/Deposit.model.js';
 import Withdrawal from '../models/Withdrawal.model.js';
 import WatchlistItem from '../models/watchlistItem.model.js';
 import { adminDeleteAccountService } from './account.service.js';
+import { ibAccessFor } from '../utils/ibAccess.js';
 
 // search users by name or email
 export async function searchUsersService(query = {}) {
@@ -94,6 +95,7 @@ export async function getMyProfileService(userId) {
         brokerId: 1,
         isMailVerified: 1,
         kycStatus: 1,
+        ibDashboardEnabled: 1,
         brokerDisplayName: '$broker.displayName',
         brokerCode: '$broker.code',
 
@@ -109,7 +111,9 @@ export async function getMyProfileService(userId) {
     }
   ]);
 
-  return result.length ? result[0] : null;
+  if (!result.length) return null;
+  const me = result[0];
+  return { ...me, ibDashboardAccess: ibAccessFor(me) };
 }
 // update my profile details by user
 export async function updateMyProfileService(userId, payload = {}) {
@@ -472,7 +476,7 @@ export async function adminListUsersService(query = {}) {
   const [items, total] = await Promise.all([
     User.find(filter)
       .select(
-        "_id name email phone userType isMailVerified kycStatus brokerId createdAt isOnline lastSeenAt"
+        "_id name email phone userType isMailVerified kycStatus brokerId createdAt isOnline lastSeenAt ibDashboardEnabled"
       )
       .sort({ createdAt: -1 })
       .skip(skip)

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { adminDeleteUser, adminGetUserProfile, adminListUsers, adminSearchUsers, adminUpdateUser, getMyProfile, saveFcmToken, heartbeatPresence, markPresenceOffline, updateMyProfile } from '../../controllers/user.controller.js';
+import { adminDeleteUser, adminGetUserProfile, adminListUsers, adminSearchUsers, adminSetIbDashboard, adminUpdateUser, getMyProfile, saveFcmToken, heartbeatPresence, markPresenceOffline, updateMyProfile } from '../../controllers/user.controller.js';
 import { authMiddleware } from '../../middlewares/auth.middleware.js';
 import { adminAuth } from '../../middlewares/adminAuth.middleware.js';
 import { brokerAdminAuth } from '../../middlewares/brokerAuth.middleware.js';
@@ -17,6 +17,7 @@ router.post('/presence/offline', presenceAuthMiddleware, markPresenceOffline);
 router.get('/admin/search', brokerAdminAuth, adminSearchUsers);
 router.get('/admin/list', brokerAdminAuth, adminListUsers);
 router.get('/admin/:userId', brokerAdminAuth, adminGetUserProfile);
+router.patch('/admin/:userId/ib-dashboard', brokerAdminAuth, adminSetIbDashboard);
 router.patch('/admin/:userId', brokerAdminAuth, adminUpdateUser);
 router.delete('/admin/:userId', brokerAdminAuth, adminDeleteUser);
 export default router;

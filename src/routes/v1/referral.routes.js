@@ -1,6 +1,7 @@
 import express from "express";
 import { authMiddleware } from "../../middlewares/auth.middleware.js";
 import { brokerAdminAuth } from "../../middlewares/brokerAuth.middleware.js";
+import { requireIbDashboardAccess } from "../../utils/ibAccess.js";
 import {
   getMyReferralSummary,
   getMyReferralDashboard,
@@ -20,11 +21,11 @@ import {
 const router = express.Router();
 
 // User routes
-router.get("/summary", authMiddleware, getMyReferralSummary);
-router.get("/dashboard", authMiddleware, getMyReferralDashboard);
-router.get("/rewards", authMiddleware, listMyReferralRewards);
-router.get("/mine", authMiddleware, listMyDirectReferrals);
-router.post("/request", authMiddleware, requestReferralReward);
+router.get("/summary", authMiddleware, requireIbDashboardAccess, getMyReferralSummary);
+router.get("/dashboard", authMiddleware, requireIbDashboardAccess, getMyReferralDashboard);
+router.get("/rewards", authMiddleware, requireIbDashboardAccess, listMyReferralRewards);
+router.get("/mine", authMiddleware, requireIbDashboardAccess, listMyDirectReferrals);
+router.post("/request", authMiddleware, requireIbDashboardAccess, requestReferralReward);
 
 // Admin routes — network report (before :rewardId routes)
 router.get(

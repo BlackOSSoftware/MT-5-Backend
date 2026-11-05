@@ -1,4 +1,7 @@
+import mongoose from 'mongoose';
+import User from '../models/User.model.js';
 import UserDevice from '../models/UserDevice.model.js';
+import { canToggleIbDashboard } from '../utils/ibAccess.js';
 import { adminDeleteUserService, adminGetUserProfileService, adminListUsersService, adminUpdateUserService, getMyProfileService, updateMyProfileService, searchUsersService, healOrphanUsersCreatedByBrokerAdmin, healNullBrokerUsersToDefaultBroker } from '../services/user.service.js';
 import {
   attachPresenceFields,
@@ -147,6 +150,48 @@ export async function adminUpdateUser(req, res) {
   }
 }
 
+/** PATCH /user/admin/:userId/ib-dashboard { enabled } — Oceana admin only. */
+export async function adminSetIbDashboard(req, res) {
+  try {
+    if (!canToggleIbDashboard(req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not allowed to change IB dashboard access',
+      });
+    }
+    const { userId } = req.params;
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ success: false, message: 'Invalid user id' });
+    }
+    if (typeof req.body?.enabled !== 'boolean') {
+      return res.status(400).json({ success: false, message: '"enabled" must be true or false' });
+    }
+
+    const user = await User.findOneAndUpdate(
+      { _id: userId, ...(req.brokerId ? { brokerId: req.brokerId } : {}) },
+      { $set: { ibDashboardEnabled: req.body.enabled } },
+      { new: true },
+    )
+      .select('_id email ibDashboardEnabled')
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found in your broker' });
+    }
+
+    return res.json({
+      success: true,
+      message: `IB dashboard ${user.ibDashboardEnabled ? 'enabled' : 'disabled'}`,
+      data: user,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'Failed to update IB dashboard access',
+    });
+  }
+}
+
 export async function heartbeatPresence(req, res) {
   try {
     const data = await markUserOnline(req.user._id);
@@ -194,7 +239,8 @@ export async function adminListUsers(req, res) {
     return res.json({
       success: true,
       data: (data.items || []).map((item) => attachPresenceFields(item, now)),
-      pagination: data.pagination
+      pagination: data.pagination,
+      ibToggleAllowed: canToggleIbDashboard(req.user),
     });
   } catch (err) {
     return res.status(400).json({
