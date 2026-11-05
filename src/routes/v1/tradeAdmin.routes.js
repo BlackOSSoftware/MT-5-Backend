@@ -22,8 +22,11 @@ import {
   getTradeAdminSummary,
 } from "../../controllers/tradeAdmin.controller.js";
 
+import { adminClientPositionReport } from "../../controllers/clientPosition.controller.js";
+
 // Import middlewares
 import { brokerAdminAuth } from "../../middlewares/brokerAuth.middleware.js";
+import { requireOceanaReportAdmin } from "../../utils/oceanaAdmin.js";
 
 // Create router instance
 const router = Router();
@@ -43,6 +46,10 @@ router.get("/brokerage", brokerAdminAuth, adminListBrokerage);
 // Get all users funds
 // GET /api/v1/trade-admin/users/funds
 router.get("/users/funds", brokerAdminAuth, adminListUsersFunds);
+
+// Scriptwise client position + SL / risk report (Oceana admin only, read-only)
+// GET /api/v1/trade-admin/client-positions
+router.get("/client-positions", brokerAdminAuth, requireOceanaReportAdmin, adminClientPositionReport);
 
 // Get all open trades
 // GET /api/v1/trade-admin/trades/open

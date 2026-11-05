@@ -1164,6 +1164,14 @@ async function resolveEngineSymbol(raw) {
   return stripped;
 }
 
+/** Last raw feed quote per symbol (also for symbols the engine has not loaded). */
+const lastFeedQuotes = new Map();
+
+export function getLastFeedQuote(symbolRaw) {
+  const key = normalizeSymbol(symbolRaw);
+  return lastFeedQuotes.get(key) || null;
+}
+
 async function feedEnginePrice(data) {
   const raw =
     data?.code ||
@@ -1179,6 +1187,13 @@ async function feedEnginePrice(data) {
 
   const bid = safeNum(bestBid);
   const ask = safeNum(bestAsk);
+
+  if (bid > 0 || ask > 0) {
+    const quote = { bid: bid > 0 ? bid : ask, ask: ask > 0 ? ask : bid, at: Date.now() };
+    for (const key of new Set([normalizeSymbol(raw), normalizeSymbol(symbol)].filter(Boolean))) {
+      lastFeedQuotes.set(key, quote);
+    }
+  }
 
   DBG("onTick feed ->", symbol, "bid", bid, "ask", ask);
 
@@ -1216,6 +1231,35 @@ wsStock.on("data", (d) => {
   broadcastData("stock", d);
   feedEnginePrice(d);
 });
+
+/**
+ * Server-side upstream subscription for symbols that must always have a live price
+ * (open positions / pending orders), even when no client socket is watching them.
+ * Same upstream path as a client "subscribe"; AlltickWS.subscribe skips duplicates.
+ */
+export async function ensureServerSubscriptions(symbols = []) {
+  for (const raw of new Set(symbols.map(normalizeSymbol).filter(Boolean))) {
+    try {
+      const engineSym =
+        findInstrumentInEngineForSubscribe(raw) || null;
+      let segment = engineSym?.segment;
+      if (!segment) {
+        const instrument = await findInstrumentByAnySymbol(raw).catch(() => null);
+        segment = instrument?.segment;
+      }
+      const feedMarket = normalizeFeedMarket(segment || "forex");
+      const providerSymbol = await resolveInstrumentProviderCode(raw).catch(() => null);
+      if (feedMarket === "stock") wsStock.subscribe(raw, 5, providerSymbol || raw);
+      else wsCrypto.subscribe(raw, 5, providerSymbol || raw);
+    } catch (err) {
+      DBG("ensureServerSubscriptions failed", raw, err && err.message ? err.message : err);
+    }
+  }
+}
+
+function findInstrumentInEngineForSubscribe(symbol) {
+  return tradeEngine.symbols?.get(symbol) || null;
+}
 
 // ========================
 // ENGINE -> REDIS PUB on local engineEvents
