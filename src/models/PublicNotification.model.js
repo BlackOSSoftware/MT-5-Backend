@@ -26,6 +26,28 @@ const publicNotificationSchema = new mongoose.Schema(
       index: true,
     },
 
+    // null = platform-wide (SuperAdmin); set = only this broker's recipients
+    brokerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Broker',
+      default: null,
+      index: true,
+    },
+
+    // Who a broadcast is for: client users or broker admins
+    audience: {
+      type: String,
+      enum: ['USERS', 'ADMINS'],
+      default: 'USERS',
+      index: true,
+    },
+
+    sentBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+
     isActive: {
       type: Boolean,
       default: true

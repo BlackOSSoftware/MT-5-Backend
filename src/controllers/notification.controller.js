@@ -13,6 +13,11 @@ import {
   markAllUserNotificationsReadService,
 } from '../services/notification.service.js';
 
+const adminScope = (req) => ({
+  brokerId: req.brokerId || null,
+  isSuperAdmin: req.isSuperAdmin === true,
+});
+
 export async function adminBroadcastNotification(req, res) {
   try {
     const { title, message, data, expireAt } = req.body;
@@ -40,17 +45,28 @@ export async function adminBroadcastNotification(req, res) {
       });
     }
 
+    // SuperAdmin chooses the audience and (without x-broker-id) reaches every broker.
+    // Broker admins always notify their own broker's clients only.
+    const isSuperAdmin = req.isSuperAdmin === true;
+    const requested = String(req.body.audience || 'USERS').trim().toUpperCase();
+    const audience = isSuperAdmin && requested === 'ADMINS' ? 'ADMINS' : 'USERS';
+    if (!isSuperAdmin && !req.brokerId) {
+      return res.status(403).json({ success: false, message: 'Broker scope required' });
+    }
+
     const result = await broadcastNotification({
       title,
       message,
       data,
       expireAt: expiryDate,
       brokerId: req.brokerId || null,
+      audience,
+      sentBy: req.user?._id || null,
     });
 
     return res.json({
       success: true,
-      message: 'Notification sent to all users',
+      message: audience === 'ADMINS' ? 'Notification sent to admins' : 'Notification sent to users',
       result,
     });
   } catch (err) {
@@ -85,6 +101,8 @@ export async function adminSendUserNotification(req, res) {
       message,
       data,
       expireAt,
+      brokerId: req.brokerId || null,
+      sentBy: req.user?._id || null,
     });
 
     return res.json({
@@ -105,7 +123,7 @@ export async function adminListNotifications(req, res) {
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
     const q = String(req.query.q || '');
-    const data = await listAdminNotificationsService({ page, limit, q });
+    const data = await listAdminNotificationsService({ page, limit, q, brokerId: req.brokerId || null });
     return res.json({ success: true, ...data });
   } catch (err) {
     return res.status(400).json({
@@ -118,7 +136,7 @@ export async function adminListNotifications(req, res) {
 export async function adminGetInbox(req, res) {
   try {
     const limit = Number(req.query.limit) || 30;
-    const data = await getAdminInboxService(req.user._id, { limit });
+    const data = await getAdminInboxService(req.user._id, { limit, scope: adminScope(req) });
     return res.json({ success: true, ...data });
   } catch (err) {
     return res.status(400).json({
@@ -130,7 +148,7 @@ export async function adminGetInbox(req, res) {
 
 export async function adminGetInboxCount(req, res) {
   try {
-    const unreadCount = await getAdminUnreadCountService(req.user._id);
+    const unreadCount = await getAdminUnreadCountService(req.user._id, adminScope(req));
     return res.json({ success: true, unreadCount });
   } catch (err) {
     return res.status(400).json({
@@ -144,7 +162,7 @@ export async function adminMarkInboxRead(req, res) {
   try {
     const { id } = req.params;
     const data = await markAdminNotificationReadService(req.user._id, id);
-    const unreadCount = await getAdminUnreadCountService(req.user._id);
+    const unreadCount = await getAdminUnreadCountService(req.user._id, adminScope(req));
     return res.json({ success: true, ...data, unreadCount });
   } catch (err) {
     return res.status(400).json({
@@ -156,7 +174,7 @@ export async function adminMarkInboxRead(req, res) {
 
 export async function adminMarkAllInboxRead(req, res) {
   try {
-    const data = await markAllAdminNotificationsReadService(req.user._id);
+    const data = await markAllAdminNotificationsReadService(req.user._id, adminScope(req));
     return res.json({ success: true, ...data, unreadCount: 0 });
   } catch (err) {
     return res.status(400).json({
