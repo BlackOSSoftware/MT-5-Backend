@@ -25,8 +25,7 @@ import {
 import { adminClientPositionReport } from "../../controllers/clientPosition.controller.js";
 
 // Import middlewares
-import { brokerAdminAuth } from "../../middlewares/brokerAuth.middleware.js";
-import { requireOceanaReportAdmin } from "../../utils/oceanaAdmin.js";
+import { brokerAdminAuth, requireBrokerPermission } from "../../middlewares/brokerAuth.middleware.js";
 
 // Create router instance
 const router = Router();
@@ -47,9 +46,14 @@ router.get("/brokerage", brokerAdminAuth, adminListBrokerage);
 // GET /api/v1/trade-admin/users/funds
 router.get("/users/funds", brokerAdminAuth, adminListUsersFunds);
 
-// Scriptwise client position + SL / risk report (Oceana admin only, read-only)
+// Scriptwise client position + SL / risk report (permission: reports.client_positions)
 // GET /api/v1/trade-admin/client-positions
-router.get("/client-positions", brokerAdminAuth, requireOceanaReportAdmin, adminClientPositionReport);
+router.get(
+  "/client-positions",
+  brokerAdminAuth,
+  requireBrokerPermission("reports.client_positions"),
+  adminClientPositionReport,
+);
 
 // Get all open trades
 // GET /api/v1/trade-admin/trades/open

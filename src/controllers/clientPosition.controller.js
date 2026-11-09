@@ -3,8 +3,8 @@ import { clientPositionReportService } from "../services/clientPosition.service.
 /** GET /trade-admin/client-positions?from=&to=&accountType=live|demo|all */
 export async function adminClientPositionReport(req, res) {
   try {
-    // The report must only ever cover this admin's own broker.
-    if (!req.brokerId) {
+    // Broker admins must be broker-scoped; SuperAdmin may view platform-wide.
+    if (!req.brokerId && !req.isSuperAdmin) {
       return res.status(403).json({
         success: false,
         message: "Broker scope required for the client position report",

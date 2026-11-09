@@ -103,10 +103,12 @@ export async function clientPositionReportService({ brokerId, from, to, accountT
   const [openTrades, closedTrades] = await Promise.all([
     Trade.find(openMatch)
       .select(
-        "positionId ticket userId accountId symbol side volume openPrice stopLoss takeProfit contractSize openTime commission swap",
+        "positionId ticket userId accountId symbol side volume openPrice stopLoss takeProfit contractSize openTime commission swap spread",
       )
       .lean(),
-    Trade.find(closedMatch).select("accountId symbol realizedPnL").lean(),
+    Trade.find(closedMatch)
+      .select("accountId symbol realizedPnL commission spread volume")
+      .lean(),
   ]);
 
   const accountIds = [
@@ -148,6 +150,9 @@ export async function clientPositionReportService({ brokerId, from, to, accountT
         closedProfit: 0,
         closedLoss: 0,
         closedTrades: 0,
+        commission: 0,
+        spreadPoints: 0,
+        spreadVolume: 0,
         bid: null,
         ask: null,
       });
@@ -171,6 +176,12 @@ export async function clientPositionReportService({ brokerId, from, to, accountT
     s.ask = quote.ask ?? s.ask;
     s.openPositions += 1;
     s.clientFloating += floating;
+    s.commission += Number(t.commission) || 0;
+    const sp = Number(t.spread) || 0;
+    if (sp > 0) {
+      s.spreadPoints += sp * t.volume;
+      s.spreadVolume += t.volume;
+    }
     if (t.side === "BUY") {
       s.longLots += t.volume;
       s.longValue += t.volume * t.openPrice;
@@ -213,6 +224,12 @@ export async function clientPositionReportService({ brokerId, from, to, accountT
     const s = script(t.symbol);
     const pnl = Number(t.realizedPnL) || 0;
     s.closedTrades += 1;
+    s.commission += Number(t.commission) || 0;
+    const sp = Number(t.spread) || 0;
+    if (sp > 0) {
+      s.spreadPoints += sp * (Number(t.volume) || 0);
+      s.spreadVolume += Number(t.volume) || 0;
+    }
     if (pnl >= 0) s.closedProfit += pnl;
     else s.closedLoss += -pnl;
   }
@@ -221,7 +238,8 @@ export async function clientPositionReportService({ brokerId, from, to, accountT
     .map((s) => {
       const closedNet = s.closedProfit - s.closedLoss;
       // Broker is the counterparty: client gains are broker losses and vice versa.
-      const brokerNet = -(s.clientFloating + closedNet);
+      // Commission charged to clients is broker income on top of the P/L side.
+      const brokerNet = -(s.clientFloating + closedNet) + s.commission;
       const quote = s.bid == null && s.ask == null ? liveQuote(s.symbol) : { bid: s.bid, ask: s.ask };
       return {
         symbol: s.symbol,
@@ -240,6 +258,9 @@ export async function clientPositionReportService({ brokerId, from, to, accountT
         brokerProfit: round(Math.max(brokerNet, 0)),
         brokerLoss: round(Math.max(-brokerNet, 0)),
         brokerNet: round(brokerNet),
+        commission: round(s.commission),
+        /** Volume-weighted average spread in points across open + closed trades. */
+        spreadAvg: s.spreadVolume > 0 ? round(s.spreadPoints / s.spreadVolume, 1) : null,
       };
     })
     .sort((a, b) => b.longLots + b.shortLots - (a.longLots + a.shortLots));
@@ -253,6 +274,7 @@ export async function clientPositionReportService({ brokerId, from, to, accountT
     closedProfit: sum("closedProfit"),
     closedLoss: sum("closedLoss"),
     brokerNet: sum("brokerNet"),
+    commission: sum("commission"),
     positionsWithoutSl: positions.filter((p) => p.stopLoss == null).length,
   };
 

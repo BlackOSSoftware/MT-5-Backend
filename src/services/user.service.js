@@ -18,6 +18,9 @@ import Withdrawal from '../models/Withdrawal.model.js';
 import WatchlistItem from '../models/watchlistItem.model.js';
 import { adminDeleteAccountService } from './account.service.js';
 import { ibAccessFor } from '../utils/ibAccess.js';
+import BrokerMembership from '../models/BrokerMembership.model.js';
+import Broker from '../models/Broker.model.js';
+import { MEMBERSHIP_STATUS } from '../constants/brokerPermissions.js';
 
 // search users by name or email
 export async function searchUsersService(query = {}) {
@@ -113,7 +116,20 @@ export async function getMyProfileService(userId) {
 
   if (!result.length) return null;
   const me = result[0];
-  return { ...me, ibDashboardAccess: ibAccessFor(me) };
+
+  // Admins: union of active broker-membership permissions (drives admin UI gating).
+  let permissions = [];
+  if (me.userType === 'ADMIN') {
+    const memberships = await BrokerMembership.find({
+      userId: me._id,
+      status: MEMBERSHIP_STATUS.ACTIVE,
+    })
+      .select('permissions')
+      .lean();
+    permissions = [...new Set(memberships.flatMap((m) => m.permissions || []))];
+  }
+
+  return { ...me, permissions, ibDashboardAccess: ibAccessFor(me) };
 }
 // update my profile details by user
 export async function updateMyProfileService(userId, payload = {}) {
@@ -485,8 +501,25 @@ export async function adminListUsersService(query = {}) {
     User.countDocuments(filter)
   ]);
 
+  // Attach broker (admin tenant) info so Super Admin can see who owns each user.
+  const brokerIds = [
+    ...new Set(
+      items.map((u) => u.brokerId).filter(Boolean).map((id) => String(id))
+    )
+  ];
+  const brokers = brokerIds.length
+    ? await Broker.find({ _id: { $in: brokerIds } })
+        .select("_id displayName code")
+        .lean()
+    : [];
+  const brokerById = new Map(brokers.map((b) => [String(b._id), b]));
+  const enriched = items.map((u) => ({
+    ...u,
+    broker: u.brokerId ? brokerById.get(String(u.brokerId)) || null : null,
+  }));
+
   return {
-    items,
+    items: enriched,
     pagination: {
       page,
       limit,

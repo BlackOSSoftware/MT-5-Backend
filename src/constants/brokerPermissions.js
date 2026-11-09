@@ -16,6 +16,7 @@ export const BROKER_PERMISSIONS = [
   "settings.referral",
   "admins.manage",
   "reports.export",
+  "reports.client_positions",
 ];
 
 /** Full rights — naya Broker Admin default */

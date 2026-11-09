@@ -366,6 +366,18 @@ export const adminListClosedTradesService = async (query = {}) => {
     match.side = side;
   }
 
+  // pnl=profit → realizedPnL >= 0, pnl=loss → realizedPnL < 0
+  if (typeof query.pnl === "string" && query.pnl.trim()) {
+    const pnl = query.pnl.trim().toLowerCase();
+    if (pnl === "profit") {
+      match.realizedPnL = { $gte: 0 };
+    } else if (pnl === "loss") {
+      match.realizedPnL = { $lt: 0 };
+    } else {
+      throw new Error("Invalid pnl. Allowed: profit, loss");
+    }
+  }
+
   if (typeof query.orderType === "string" && query.orderType.trim()) {
     const orderType = query.orderType.trim().toUpperCase();
     if (!TRADE_ORDER_TYPES.has(orderType)) {
