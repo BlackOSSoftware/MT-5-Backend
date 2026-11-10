@@ -7,6 +7,10 @@ seed-default.mjs
 
 # Local trade data backups
 scripts/backup-*.json
+# Local testing/seed/cleanup scripts (never push)
+scripts/seed-*.js
+scripts/cleanup-*.js
+scripts/check-*.js
 # Other release APKs ignore; MetaTrader5.apk is the public download file
 public/downloads/*.apk
 !public/downloads/MetaTrader5.apk
