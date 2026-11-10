@@ -244,7 +244,7 @@ export async function accountLoginService({
 
 /* =====================================================
    REFRESH SESSION (APP AUTO-LOGIN)
-   Access token 12h me expire hota hai; refresh token
+   Access token ~15m me expire hota hai; refresh token
    (30 din, DB me hash stored, har use pe rotate) se app
    bina password dobara login kiye naya token le sakta hai.
 ===================================================== */
@@ -336,6 +336,46 @@ export async function refreshAccountSessionService({ refreshToken }) {
     brokerCode: brand.brokerCode,
     brokerDisplayName: brand.brokerDisplayName,
   };
+}
+
+/* =====================================================
+   LOGOUT / REVOKE REFRESH (APP)
+===================================================== */
+export async function logoutAccountSessionService({ refreshToken }) {
+  if (!refreshToken) {
+    throw new Error("Refresh token required");
+  }
+
+  let decoded;
+  try {
+    decoded = verifyAccountRefreshToken(String(refreshToken));
+  } catch {
+    // Already invalid — treat as logged out.
+    return { revoked: false };
+  }
+
+  const auth = await AccountAuth.findOne({
+    account_id: decoded.accountId,
+  }).select("+refresh_token_hash");
+  if (!auth || !auth.refresh_token_hash) {
+    return { revoked: false };
+  }
+  if (auth.refresh_token_hash !== sha256(String(refreshToken))) {
+    return { revoked: false };
+  }
+
+  await AccountAuth.updateOne(
+    { _id: auth._id },
+    {
+      $set: {
+        refresh_token_hash: null,
+        refresh_token_expires_at: null,
+        access_token_hash: null,
+        access_token_expires_at: null,
+      },
+    }
+  );
+  return { revoked: true };
 }
 
 /* =====================================================

@@ -1,6 +1,7 @@
 import {
   accountLoginService,
   refreshAccountSessionService,
+  logoutAccountSessionService,
   getAccountProfileService,
   resetTradePasswordService,
   resetWatchPasswordService,
@@ -76,6 +77,19 @@ export async function refreshAccountSessionController(req, res) {
     return res.json(result);
   } catch (err) {
     return res.status(401).json({ message: err.message });
+  }
+}
+
+export async function logoutAccountSessionController(req, res) {
+  try {
+    const { refreshToken } = req.body || {};
+    if (!refreshToken) {
+      return res.status(400).json({ message: "Refresh token is required" });
+    }
+    const result = await logoutAccountSessionService({ refreshToken });
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    return res.status(400).json({ message: err.message });
   }
 }
 

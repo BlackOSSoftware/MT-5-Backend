@@ -1,13 +1,29 @@
 import AppRelease from "./appUpdate.model.js";
 import { envDefaults } from "./appUpdate.constants.js";
 
+function normalizeApkUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw) return "/downloads/Oceana.apk";
+  // Old MetaTrader update path → Oceana APK (same file, new name).
+  if (/MetaTrader5\.apk$/i.test(raw) || /\/app\.apk$/i.test(raw)) {
+    if (raw.startsWith("http")) {
+      return raw.replace(/MetaTrader5\.apk$/i, "Oceana.apk").replace(
+        /\/app\.apk$/i,
+        "/Oceana.apk",
+      );
+    }
+    return "/downloads/Oceana.apk";
+  }
+  return raw;
+}
+
 function toPublic(doc, platform) {
   const src = doc || envDefaults();
   return {
     platform,
     latestVersionName: src.latestVersionName,
     latestVersionCode: Number(src.latestVersionCode) || 0,
-    apkUrl: src.apkUrl || "",
+    apkUrl: normalizeApkUrl(src.apkUrl),
     force: Boolean(src.force),
     releaseNotes: src.releaseNotes || "",
     updatedAt: doc?.updatedAt || null,

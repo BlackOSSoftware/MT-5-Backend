@@ -12,7 +12,7 @@ export function envDefaults() {
   return {
     latestVersionName: process.env.APP_LATEST_VERSION_NAME || "1.0.0",
     latestVersionCode: Number(process.env.APP_LATEST_VERSION_CODE) || 1,
-    apkUrl: process.env.APP_APK_URL || "",
+    apkUrl: process.env.APP_APK_URL || "/downloads/Oceana.apk",
     force: String(process.env.APP_FORCE_UPDATE || "").toLowerCase() === "true",
     releaseNotes: process.env.APP_RELEASE_NOTES || "",
   };

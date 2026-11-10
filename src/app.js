@@ -91,10 +91,14 @@ app.use(
   }),
 );
 
-// Convenience aliases → same APK in public/downloads
-app.get(['/MetaTrader5.apk', '/downloads/app.apk'], (_req, res) => {
-  res.redirect(302, `${DOWNLOADS_ROUTE}/MetaTrader5.apk`);
-});
+// Convenience aliases → Oceana APK in public/downloads
+// (legacy MetaTrader5.apk path kept so old links still work)
+app.get(
+  ['/Oceana.apk', '/MetaTrader5.apk', '/downloads/app.apk'],
+  (_req, res) => {
+    res.redirect(302, `${DOWNLOADS_ROUTE}/Oceana.apk`);
+  },
+);
 
 app.get('/', (req, res) => {
   res.status(200).json({ status: 'ok' });

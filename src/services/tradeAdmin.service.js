@@ -72,7 +72,7 @@ const attachUserAccountLabels = async (
       : [],
     accountIds.length
       ? Account.find({ _id: { $in: accountIds } })
-          .select("account_number")
+          .select("account_number account_type balance equity")
           .lean()
       : [],
   ]);
@@ -83,18 +83,23 @@ const attachUserAccountLabels = async (
   const accountMap = new Map(
     accounts.map((a) => [String(a._id), a.account_number || ""])
   );
+  const accountDetailsMap = new Map(accounts.map((account) => [String(account._id), account]));
 
   return items.map((item) => {
     const userId = String(item?.[userKey] ?? "");
     const accountId = String(item?.[accountKey] ?? "");
     const user = userMap.get(userId);
     const accountNumber = accountMap.get(accountId) || "";
+    const accountDetails = accountDetailsMap.get(accountId);
 
     return {
       ...item,
       userName: user?.name || "",
       userEmail: user?.email || "",
       accountNumber,
+      accountType: accountDetails?.account_type || "",
+      accountBalance: accountDetails?.balance ?? 0,
+      accountEquity: accountDetails?.equity ?? 0,
       // camel + snake for mixed admin payloads
       account_number: accountNumber,
       user_name: user?.name || "",
@@ -445,6 +450,7 @@ export const adminListClosedTradesService = async (query = {}) => {
               _id: 1,
               userId: 1,
               accountId: 1,
+              brokerId: 1,
               ipAddress: 1,
 
               positionId: 1,
@@ -521,10 +527,11 @@ export const adminListClosedTradesService = async (query = {}) => {
 export const adminListOpenTradesService = async (query = {}) => {
   const pageRaw = Number(query.page);
   const limitRaw = Number(query.limit);
+  const all = String(query.all || "").toLowerCase() === "true";
 
-  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+  const page = all ? 1 : Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
   const limit =
-    Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 100) : 20;
+    all ? 5000 : Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 100) : 20;
   const skip = (page - 1) * limit;
 
   if (typeof query.status === "string" && query.status.trim()) {
@@ -636,6 +643,7 @@ export const adminListOpenTradesService = async (query = {}) => {
               _id: 1,
               userId: 1,
               accountId: 1,
+              brokerId: 1,
               ipAddress: 1,
 
               positionId: 1,
@@ -697,9 +705,29 @@ export const adminListOpenTradesService = async (query = {}) => {
   const items = await attachUserAccountLabels(
     Array.isArray(row.items) ? row.items : []
   );
+  const summaryTrades = all
+    ? items
+    : await Trade.find(match)
+        .select("accountId stopLoss volume marginUsed")
+        .lean();
+  const accountIdsWithPositions = new Set(summaryTrades.map((item) => String(item.accountId)));
+  const accountIdsWithStopLoss = new Set(
+    summaryTrades.filter((item) => Number(item.stopLoss) > 0).map((item) => String(item.accountId))
+  );
+  const summary = {
+    totalPositions: total,
+    totalAccounts: accountIdsWithPositions.size,
+    accountsWithStopLoss: accountIdsWithStopLoss.size,
+    accountsWithoutStopLoss: Math.max(0, accountIdsWithPositions.size - accountIdsWithStopLoss.size),
+    protectedPositions: summaryTrades.filter((item) => Number(item.stopLoss) > 0).length,
+    unprotectedPositions: summaryTrades.filter((item) => !(Number(item.stopLoss) > 0)).length,
+    totalVolume: summaryTrades.reduce((sum, item) => sum + (Number(item.volume) || 0), 0),
+    totalMargin: summaryTrades.reduce((sum, item) => sum + (Number(item.marginUsed) || 0), 0),
+  };
 
   return {
     items,
+    summary,
     pagination: {
       page,
       limit,

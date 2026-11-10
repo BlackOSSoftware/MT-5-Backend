@@ -335,6 +335,7 @@ export const adminListOpenTrades = async (req, res) => {
       success: true,
       data: result.items,
       pagination: result.pagination,
+      summary: result.summary,
     });
   } catch (error) {
     return res.status(400).json({

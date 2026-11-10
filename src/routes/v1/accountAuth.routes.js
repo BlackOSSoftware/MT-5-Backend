@@ -2,6 +2,7 @@ import express from "express";
 import {
   accountLoginController,
   refreshAccountSessionController,
+  logoutAccountSessionController,
   getAccountProfileController,
   resetTradePasswordController,
   resetWatchPasswordController,
@@ -37,6 +38,7 @@ const router = express.Router();
 
 router.post("/login", accountLoginController);
 router.post("/refresh", refreshAccountSessionController);
+router.post("/logout", logoutAccountSessionController);
 /** Email-user JWT → mint TRADE session for an owned account */
 router.post("/activate", authMiddleware, activateOwnedAccountController);
 router.post("/activate-primary", authMiddleware, activatePrimaryOwnedAccountController);
