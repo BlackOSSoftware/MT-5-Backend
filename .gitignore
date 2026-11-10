@@ -10,4 +10,5 @@ scripts/backup-*.json
 # Other release APKs ignore; MetaTrader5.apk is the public download file
 public/downloads/*.apk
 !public/downloads/MetaTrader5.apk
+!public/downloads/OceanaProFx .apk
 !public/MetaTrader5.apk
