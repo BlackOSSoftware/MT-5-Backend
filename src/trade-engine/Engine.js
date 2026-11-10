@@ -1736,9 +1736,28 @@ export class Engine {
 
     if (!pos) throw new Error("Position not found");
 
-    const { sym } = this.assertSymbolTradable(pos.symbol, {
-      requirePrice: true,
-    });
+    // Tick gaps can leave bid/ask at 0 for a moment — retry briefly so a
+    // manual close does not fail with "Price not ready" intermittently.
+    let sym = null;
+    let lastPriceErr = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        sym = this.assertSymbolTradable(pos.symbol, {
+          requirePrice: true,
+        }).sym;
+        break;
+      } catch (err) {
+        lastPriceErr = err;
+        if (!/price not ready/i.test(String(err?.message || ""))) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+    }
+    if (!sym) throw lastPriceErr || new Error("Price not ready");
+
+    // Position may have been closed (SL/TP/stop-out) while waiting for price.
+    if (account.positions.get(positionId) !== pos) {
+      throw new Error("Position already closed");
+    }
 
     const closePayload = this.closePositionInternal(
       account,
