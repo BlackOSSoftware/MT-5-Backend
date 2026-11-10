@@ -16,6 +16,11 @@ import {
   adminListReferralLinks,
   adminGetReferralTree,
   adminGetUserReferralSummary,
+  getMyReferralTree,
+  createMySubIbRequest,
+  getMySubIbRequest,
+  listSubIbRequests,
+  respondSubIbRequest,
 } from "../../controllers/referral.controller.js";
 
 const router = express.Router();
@@ -26,6 +31,16 @@ router.get("/dashboard", authMiddleware, requireIbDashboardAccess, getMyReferral
 router.get("/rewards", authMiddleware, requireIbDashboardAccess, listMyReferralRewards);
 router.get("/mine", authMiddleware, requireIbDashboardAccess, listMyDirectReferrals);
 router.post("/request", authMiddleware, requireIbDashboardAccess, requestReferralReward);
+router.get("/tree", authMiddleware, requireIbDashboardAccess, getMyReferralTree);
+router.post("/sub-ib-request", authMiddleware, requireIbDashboardAccess, createMySubIbRequest);
+router.get("/sub-ib-request/mine", authMiddleware, requireIbDashboardAccess, getMySubIbRequest);
+router.get("/sub-ib-requests", authMiddleware, requireIbDashboardAccess, listSubIbRequests);
+router.patch(
+  "/sub-ib-requests/:requestId",
+  authMiddleware,
+  requireIbDashboardAccess,
+  respondSubIbRequest,
+);
 
 // Admin routes — network report (before :rewardId routes)
 router.get(

@@ -446,3 +446,81 @@ export async function getReferralDashboardService({
     },
   };
 }
+
+/**
+ * Downline tree for the logged-in IB (My Clients page).
+ * BFS over Referral.referred_by, depth-capped, returns nested children.
+ */
+export async function getMyReferralTreeService({ userId, maxDepth = 6 }) {
+  if (!mongoose.isValidObjectId(userId)) {
+    throw new Error("Invalid userId");
+  }
+  const safeDepth = Math.min(Math.max(Number(maxDepth) || 6, 1), 8);
+  const MAX_NODES = 400;
+
+  const root = await Referral.findOne({ user_id: userId })
+    .populate("user_id", "name email")
+    .lean();
+
+  // level -> map parentId -> children[]
+  const nodes = new Map(); // userId -> { userId, name, email, level, children: [] }
+  const rootId = String(userId);
+  nodes.set(rootId, {
+    userId: rootId,
+    name: root?.user_id?.name || "You",
+    email: root?.user_id?.email || "",
+    level: 0,
+    children: [],
+  });
+
+  let frontier = [rootId];
+  let level = 0;
+  let totalNodes = 1;
+
+  while (frontier.length && level < safeDepth && totalNodes < MAX_NODES) {
+    const batch = frontier.splice(0, frontier.length);
+    const kids = await Referral.find({
+      referred_by: { $in: batch.map((id) => new mongoose.Types.ObjectId(id)) },
+    })
+      .populate("user_id", "name email")
+      .select("user_id referred_by createdAt")
+      .lean();
+
+    const next = [];
+    for (const k of kids) {
+      const kidId = k.user_id?._id ? String(k.user_id._id) : null;
+      if (!kidId || nodes.has(kidId)) continue;
+      if (totalNodes >= MAX_NODES) break;
+      const parentId = String(k.referred_by || "");
+      const parent = nodes.get(parentId);
+      if (!parent) continue;
+      const node = {
+        userId: kidId,
+        name: k.user_id?.name || "User",
+        email: k.user_id?.email || "",
+        level: level + 1,
+        children: [],
+      };
+      nodes.set(kidId, node);
+      parent.children.push(node);
+      next.push(kidId);
+      totalNodes += 1;
+    }
+    frontier = next;
+    level += 1;
+  }
+
+  const rootNode = nodes.get(rootId);
+  const directCount = rootNode?.children?.length || 0;
+  const networkSize = totalNodes - 1;
+
+  return {
+    root: rootNode,
+    stats: {
+      directReferrals: directCount,
+      networkSize,
+      maxDepth: safeDepth,
+      truncated: totalNodes >= MAX_NODES,
+    },
+  };
+}

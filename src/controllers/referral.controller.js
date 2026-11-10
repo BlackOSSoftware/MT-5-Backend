@@ -8,7 +8,13 @@ import {
   adminApproveReferralRewardService,
   adminRejectReferralRewardService,
 } from "../services/referral.service.js";
-import { getReferralDashboardService } from "../services/referralDashboard.service.js";
+import { getReferralDashboardService, getMyReferralTreeService } from "../services/referralDashboard.service.js";
+import {
+  createSubIbRequestService,
+  listSubIbRequestsService,
+  getMySubIbRequestService,
+  respondSubIbRequestService,
+} from "../services/ibRequest.service.js";
 import {
   adminGetReferralTreeService,
   adminListReferralLinksService,
@@ -250,6 +256,78 @@ export async function adminGetReferralTree(req, res) {
       brokerId,
     });
     return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(err.status || 400).json({ success: false, message: err.message });
+  }
+}
+
+export async function getMyReferralTree(req, res) {
+  try {
+    const { maxDepth } = req.query;
+    const data = await getMyReferralTreeService({
+      userId: req.user._id,
+      maxDepth: maxDepth ? Number(maxDepth) : 6,
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function createMySubIbRequest(req, res) {
+  try {
+    const data = await createSubIbRequestService({
+      userId: req.user._id,
+      note: req.body?.note,
+    });
+    return res.status(201).json({
+      success: true,
+      message: "Sub-IB request sent",
+      data,
+    });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function getMySubIbRequest(req, res) {
+  try {
+    const data = await getMySubIbRequestService({ userId: req.user._id });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function listSubIbRequests(req, res) {
+  try {
+    const { status, page = 1, limit = 50 } = req.query;
+    const result = await listSubIbRequestsService({
+      ibId: req.user._id,
+      status,
+      page: Number(page),
+      limit: Number(limit),
+    });
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function respondSubIbRequest(req, res) {
+  try {
+    const { action, reason } = req.body || {};
+    const data = await respondSubIbRequestService({
+      ibId: req.user._id,
+      requestId: req.params.requestId,
+      action,
+      reason,
+    });
+    return res.status(200).json({
+      success: true,
+      message: action === "APPROVE" ? "Sub-IB request approved" : "Sub-IB request rejected",
+      data,
+    });
   } catch (err) {
     return res.status(err.status || 400).json({ success: false, message: err.message });
   }
