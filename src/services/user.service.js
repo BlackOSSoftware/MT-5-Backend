@@ -99,6 +99,8 @@ export async function getMyProfileService(userId) {
         isMailVerified: 1,
         kycStatus: 1,
         ibDashboardEnabled: 1,
+        wallet_balance: 1,
+        wallet_hold_balance: 1,
         brokerDisplayName: '$broker.displayName',
         brokerCode: '$broker.code',
 
@@ -564,6 +566,8 @@ export async function adminGetUserProfileService(userId) {
         userType: 1,
         isMailVerified: 1,
         kycStatus: 1,
+        wallet_balance: 1,
+        wallet_hold_balance: 1,
         createdAt: 1,
         isOnline: 1,
         lastSeenAt: 1,

@@ -294,6 +294,8 @@ export const adminListUsersFundsService = async (query = {}) => {
               userType: 1,
               isMailVerified: 1,
               kycStatus: 1,
+              wallet_balance: 1,
+              wallet_hold_balance: 1,
               createdAt: 1,
               updatedAt: 1,
               funds: 1,

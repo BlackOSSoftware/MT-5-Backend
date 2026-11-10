@@ -59,21 +59,6 @@ function inRange(date, start, end) {
   return true;
 }
 
-function maskName(name) {
-  const parts = String(name || "")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  if (!parts.length) return "User";
-  return parts
-    .map((part) => {
-      const first = part[0] || "?";
-      const dots = part.length > 3 ? "•••" : "••";
-      return `${first}${dots}`;
-    })
-    .join(" ");
-}
-
 /** Collect user ids: direct only, or full downline (network/total). */
 async function collectScopeUserIds(rootUserId, scope) {
   const root = String(rootUserId);
@@ -422,28 +407,32 @@ export async function getReferralDashboardService({
     },
     recentDeposits: (recentDeposits || []).map((d) => ({
       id: String(d._id),
-      name: maskName(d.user?.name || "User"),
+      name: d.user?.name || "User",
+      email: d.user?.email || "",
       amount: Number(d.amount || 0),
       status: d.status,
       createdAt: d.createdAt,
     })),
     recentWithdrawals: (recentWithdrawals || []).map((w) => ({
       id: String(w._id),
-      name: maskName(w.user?.name || "User"),
+      name: w.user?.name || "User",
+      email: w.user?.email || "",
       amount: Number(w.amount || 0),
       status: w.status,
       createdAt: w.createdAt,
     })),
     recentPayouts: (recentPayouts || []).map((r) => ({
       id: String(r._id),
-      name: maskName(r.referred_user?.name || "Client"),
+      name: r.referred_user?.name || "Client",
+      email: r.referred_user?.email || "",
       amount: Number(r.reward_amount || 0),
       status: r.status,
       createdAt: r.createdAt,
     })),
     recentAccounts: (recentAccounts || []).map((a) => ({
       id: String(a._id),
-      name: maskName(a.user_id?.name || "User"),
+      name: a.user_id?.name || "User",
+      email: a.user_id?.email || "",
       accountNumber: a.account_number,
       accountType: a.account_type,
       status: a.status,

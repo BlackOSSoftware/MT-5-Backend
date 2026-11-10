@@ -84,7 +84,7 @@ const buildFilter = ({ userId, query, isAdmin }) => {
 const hasText = (value) =>
   typeof value === "string" && value.trim().length > 0;
 
-const validatePayout = ({ method, payout }) => {
+export const validatePayout = ({ method, payout }) => {
   if (!method) {
     return { ok: false, message: "Withdrawal method is required" };
   }
@@ -152,7 +152,7 @@ const validatePayout = ({ method, payout }) => {
   return { ok: true, message: "OK" };
 };
 
-const buildPayoutSnapshot = (payout = {}) => ({
+export const buildPayoutSnapshot = (payout = {}) => ({
   upi_id: payout?.upi_id || "",
   bank_name: payout?.bank_name || "",
   account_holder_name: payout?.account_holder_name || "",
@@ -1033,6 +1033,72 @@ export const adminApproveWithdrawal = async ({
         }
       }
 
+      /* =========================
+         WALLET-SOURCED WITHDRAWAL
+         Funds were locked in wallet_hold_balance at request time.
+         Approval only releases the hold (money leaves the system).
+      ========================== */
+      if (withdrawal.source === "WALLET") {
+        const walletUser = await User.findById(withdrawal.user).session(session);
+        if (!walletUser) {
+          throw new Error("User not found for this withdrawal");
+        }
+
+        const walletHold =
+          typeof walletUser.wallet_hold_balance === "number"
+            ? walletUser.wallet_hold_balance
+            : 0;
+
+        if (withdrawal.amount > walletHold) {
+          throw new Error("Wallet hold balance mismatch. Cannot approve withdrawal");
+        }
+
+        const walletBalance =
+          typeof walletUser.wallet_balance === "number"
+            ? walletUser.wallet_balance
+            : 0;
+
+        if (withdrawal.amount > walletBalance) {
+          throw new Error("Wallet balance mismatch. Cannot approve withdrawal");
+        }
+
+        // Approved payout leaves the system: reduce total balance AND release hold.
+        walletUser.wallet_balance = Math.max(
+          0,
+          walletBalance - withdrawal.amount,
+        );
+        walletUser.wallet_hold_balance = Math.max(
+          0,
+          walletHold - withdrawal.amount,
+        );
+        await walletUser.save({ session });
+
+        withdrawal.status = "COMPLETED";
+        withdrawal.actionBy = adminId;
+        withdrawal.actionAt = new Date();
+        withdrawal.rejectionReason = "";
+
+        updatedWithdrawal = await withdrawal.save({ session });
+
+        const WalletTransaction = (await import("../models/WalletTransaction.model.js")).default;
+        await WalletTransaction.findOneAndUpdate(
+          {
+            referenceType: "WITHDRAWAL",
+            referenceId: withdrawal._id,
+            user: withdrawal.user,
+          },
+          {
+            $set: {
+              status: "SUCCESS",
+              remark: "Wallet withdrawal approved and completed",
+            },
+          },
+          { session },
+        );
+
+        return;
+      }
+
       const account = await Account.findOne({
         _id: withdrawal.account,
         user_id: withdrawal.user,
@@ -1173,6 +1239,61 @@ export const adminRejectWithdrawal = async ({
         if (!stampedOk) {
           await assertUserBelongsToBroker(withdrawal.user, brokerId);
         }
+      }
+
+      /* =========================
+         WALLET-SOURCED WITHDRAWAL
+         Reject releases the hold — funds become available again.
+      ========================== */
+      if (withdrawal.source === "WALLET") {
+        const walletUser = await User.findById(withdrawal.user).session(session);
+        if (!walletUser) {
+          throw new Error("User not found for this withdrawal");
+        }
+
+        const walletHold =
+          typeof walletUser.wallet_hold_balance === "number"
+            ? walletUser.wallet_hold_balance
+            : 0;
+
+        if (withdrawal.amount > walletHold) {
+          throw new Error("Wallet hold balance mismatch. Cannot reject withdrawal");
+        }
+
+        walletUser.wallet_hold_balance = Math.max(
+          0,
+          walletHold - withdrawal.amount,
+        );
+        await walletUser.save({ session });
+
+        engineAccountId = null;
+        engineNewBalance = null;
+        engineBonusBalance = null;
+
+        withdrawal.status = "REJECTED";
+        withdrawal.rejectionReason = reason;
+        withdrawal.actionBy = adminId;
+        withdrawal.actionAt = new Date();
+
+        updatedWithdrawal = await withdrawal.save({ session });
+
+        const WalletTransaction = (await import("../models/WalletTransaction.model.js")).default;
+        await WalletTransaction.findOneAndUpdate(
+          {
+            referenceType: "WITHDRAWAL",
+            referenceId: withdrawal._id,
+            user: withdrawal.user,
+          },
+          {
+            $set: {
+              status: "FAILED",
+              remark: `Wallet withdrawal rejected: ${reason}`,
+            },
+          },
+          { session },
+        );
+
+        return;
       }
 
       const account = await Account.findOne({

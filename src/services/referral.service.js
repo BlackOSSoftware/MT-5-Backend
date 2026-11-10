@@ -5,6 +5,8 @@ import Account from "../models/Account.model.js";
 import AccountPlan from "../models/AccountPlan.model.js";
 import Deposit from "../models/Deposit.model.js";
 import Transaction from "../models/Transaction.model.js";
+import User from "../models/User.model.js";
+import WalletTransaction from "../models/WalletTransaction.model.js";
 import { generateReferralCode } from "../utils/referralCode.util.js";
 import EngineSync from "../trade-engine/EngineSync.js";
 import { publishAccountBalance } from "../trade-engine/EngineSyncBus.js";
@@ -292,6 +294,7 @@ export async function requestReferralRewardService({
   userId,
   rewardId,
   accountId,
+  destination = "account",
 }) {
   if (!mongoose.isValidObjectId(userId)) {
     throw new Error("Invalid userId");
@@ -299,7 +302,9 @@ export async function requestReferralRewardService({
   if (!mongoose.isValidObjectId(rewardId)) {
     throw new Error("Invalid rewardId");
   }
-  if (!mongoose.isValidObjectId(accountId)) {
+  const payoutDestination =
+    destination === "wallet" ? "wallet" : "account";
+  if (payoutDestination === "account" && !mongoose.isValidObjectId(accountId)) {
     throw new Error("Invalid accountId");
   }
 
@@ -308,17 +313,21 @@ export async function requestReferralRewardService({
 
   try {
     await session.withTransaction(async () => {
-      const account = await Account.findOne({
-        _id: accountId,
-        user_id: userId,
-        status: "active",
-      }).session(session);
+      let account = null;
 
-      if (!account) {
-        throw new Error("Account not found");
-      }
-      if (account.account_type !== "live") {
-        throw new Error("Referral reward can be credited only to a live account");
+      if (payoutDestination === "account") {
+        account = await Account.findOne({
+          _id: accountId,
+          user_id: userId,
+          status: "active",
+        }).session(session);
+
+        if (!account) {
+          throw new Error("Account not found");
+        }
+        if (account.account_type !== "live") {
+          throw new Error("Referral reward can be credited only to a live account");
+        }
       }
 
       const reward = await ReferralReward.findOne({
@@ -336,6 +345,75 @@ export async function requestReferralRewardService({
         throw new Error("Invalid reward amount");
       }
 
+      if (payoutDestination === "wallet") {
+        /* ---------- credit user wallet ---------- */
+        const walletUser = await User.findById(userId).session(session);
+        if (!walletUser) {
+          throw new Error("User not found");
+        }
+
+        const newWalletBalance =
+          Number(walletUser.wallet_balance || 0) + amount;
+        const newAvailable = Math.max(
+          0,
+          newWalletBalance - Number(walletUser.wallet_hold_balance || 0),
+        );
+
+        await User.updateOne(
+          { _id: walletUser._id },
+          { $set: { wallet_balance: newWalletBalance } },
+          { session },
+        );
+
+        await WalletTransaction.create(
+          [
+            {
+              user: userId,
+              type: "CREDIT",
+              amount,
+              balanceAfter: newAvailable,
+              status: "SUCCESS",
+              referenceType: "REFERRAL",
+              referenceId: reward._id,
+              createdBy: userId,
+              remark: "Referral payout credited to wallet",
+            },
+          ],
+          { session },
+        );
+
+        await Referral.updateOne(
+          { user_id: userId },
+          { $inc: { total_earned: amount } },
+          { session, upsert: true },
+        );
+
+        await Referral.updateOne(
+          { user_id: reward.referred_user },
+          { $set: { status: "CONFIRMED" } },
+          { session },
+        );
+
+        reward.status = "APPROVED";
+        reward.requested_account = null;
+        reward.requested_at = new Date();
+        reward.approved_at = new Date();
+        reward.approved_by = userId;
+        await reward.save({ session });
+
+        result = {
+          rewardId: reward._id,
+          destination: "wallet",
+          amount,
+          walletBalance: newWalletBalance,
+          walletAvailable: newAvailable,
+          status: "APPROVED",
+          message: "Referral payout credited to your wallet",
+        };
+        return;
+      }
+
+      /* ---------- credit account bonus (existing flow) ---------- */
       const nextBonus = Number(account.bonus_balance || 0) + amount;
       const nextGranted = Number(account.bonus_granted || 0) + amount;
       const nextEquity = Number(account.balance || 0) + nextBonus;

@@ -10,11 +10,19 @@ const WithdrawalSchema = new mongoose.Schema(
       index: true,
     },
 
-    // ACCOUNT
+    // ACCOUNT (null for wallet-sourced withdrawals)
     account: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
-      required: true,
+      default: null,
+      index: true,
+    },
+
+    // FUND SOURCE: trading account balance or user wallet
+    source: {
+      type: String,
+      enum: ["ACCOUNT", "WALLET"],
+      default: "ACCOUNT",
       index: true,
     },
 

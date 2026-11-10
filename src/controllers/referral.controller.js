@@ -85,11 +85,12 @@ export async function listMyDirectReferrals(req, res) {
 
 export async function requestReferralReward(req, res) {
   try {
-    const { rewardId, accountId } = req.body;
+    const { rewardId, accountId, destination } = req.body;
     const data = await requestReferralRewardService({
       userId: req.user._id,
       rewardId,
       accountId,
+      destination,
     });
     return res.status(200).json({
       success: true,

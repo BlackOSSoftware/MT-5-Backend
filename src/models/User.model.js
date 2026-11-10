@@ -83,6 +83,19 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
+    // User wallet (Oceanaprofx client portal). Available = balance - hold.
+    wallet_balance: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    wallet_hold_balance: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
   },
   {
     timestamps: true
