@@ -799,6 +799,7 @@ export async function adminCreateDepositService({
   accountId,
   amount,
   method,
+  remark,
   proof,
   adminId,
   ipAddress,
@@ -828,6 +829,10 @@ export async function adminCreateDepositService({
       ? ipAddress.trim()
       : "127.0.0.1";
   const importDateTime = parseOptionalDateTime(dateTime, "dateTime");
+  const safeRemark =
+    typeof remark === "string" && remark.trim()
+      ? remark.trim().slice(0, 500)
+      : "";
 
   const session = await mongoose.startSession();
   let createdDeposit = null;
@@ -902,7 +907,7 @@ export async function adminCreateDepositService({
             referenceType: "DEPOSIT",
             referenceId: createdDeposit[0]._id,
             createdBy: adminId,
-            remark: "Admin deposit",
+            remark: safeRemark || "Admin deposit",
             ...(importDateTime
               ? { createdAt: importDateTime, updatedAt: importDateTime }
               : {}),

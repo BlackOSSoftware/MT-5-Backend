@@ -3,7 +3,7 @@ import IbRequest from "../models/IbRequest.model.js";
 import Referral from "../models/Referral.model.js";
 import User from "../models/User.model.js";
 
-const USER_SELECT = "name email";
+const USER_SELECT = "name email phone";
 
 function serialize(doc) {
   if (!doc) return null;
@@ -11,6 +11,9 @@ function serialize(doc) {
     ? doc.requester
     : null;
   const ib = doc.ib && typeof doc.ib === "object" ? doc.ib : null;
+  const respondedBy = doc.respondedBy && typeof doc.respondedBy === "object"
+    ? doc.respondedBy
+    : null;
   return {
     id: String(doc._id),
     status: doc.status,
@@ -19,11 +22,19 @@ function serialize(doc) {
     createdAt: doc.createdAt,
     respondedAt: doc.respondedAt || null,
     requester: requester
-      ? { id: String(requester._id), name: requester.name, email: requester.email }
-      : { id: String(doc.requester), name: "", email: "" },
+      ? {
+          id: String(requester._id),
+          name: requester.name,
+          email: requester.email,
+          phone: requester.phone || "",
+        }
+      : { id: String(doc.requester), name: "", email: "", phone: "" },
     ib: ib
-      ? { id: String(ib._id), name: ib.name, email: ib.email }
-      : { id: String(doc.ib), name: "", email: "" },
+      ? { id: String(ib._id), name: ib.name, email: ib.email, phone: ib.phone || "" }
+      : { id: String(doc.ib), name: "", email: "", phone: "" },
+    respondedBy: respondedBy
+      ? { id: String(respondedBy._id), name: respondedBy.name || "", email: respondedBy.email || "" }
+      : null,
   };
 }
 
@@ -45,14 +56,15 @@ export async function createSubIbRequestService({ userId, note = "" }) {
   const existing = await IbRequest.findOne({
     requester: userId,
     ib: ibId,
-    status: { $in: ["PENDING", "APPROVED"] },
-  }).lean();
+  }).sort({ createdAt: -1 }).lean();
   if (existing) {
-    throw new Error(
-      existing.status === "PENDING"
-        ? "You already have a pending Sub-IB request"
-        : "Your Sub-IB request was already approved",
-    );
+    if (existing.status === "PENDING") {
+      throw new Error("You already have a pending Sub-IB request");
+    }
+    if (existing.status === "APPROVED") {
+      throw new Error("Your Sub-IB request was already approved");
+    }
+    throw new Error("Your Sub-IB request was rejected — you cannot request again");
   }
 
   const doc = await IbRequest.create({
@@ -79,25 +91,70 @@ export async function listSubIbRequestsService({ ibId, status = "", page = 1, li
     filter.status = String(status).toUpperCase();
   }
 
-  const [items, total] = await Promise.all([
+  const [items, total, counts] = await Promise.all([
     IbRequest.find(filter)
       .sort({ createdAt: -1 })
       .skip((safePage - 1) * safeLimit)
       .limit(safeLimit)
       .populate("requester", USER_SELECT)
       .populate("ib", USER_SELECT)
+      .populate("respondedBy", "name email")
       .lean(),
     IbRequest.countDocuments(filter),
+    IbRequest.aggregate([
+      { $match: { ib: new mongoose.Types.ObjectId(ibId) } },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
   ]);
+
+  const statusCounts = { PENDING: 0, APPROVED: 0, REJECTED: 0 };
+  for (const c of counts) {
+    if (c._id && statusCounts[c._id] !== undefined) statusCounts[c._id] = c.count;
+  }
 
   return {
     items: items.map(serialize),
+    statusCounts,
     pagination: {
       page: safePage,
       limit: safeLimit,
       total,
       totalPages: total === 0 ? 0 : Math.ceil(total / safeLimit),
     },
+  };
+}
+
+/**
+ * Status for a referred client: who their IB is + latest request + access flag.
+ * Safe for non-IB users (no IB dashboard gate needed).
+ */
+export async function getIbRequestStatusService({ userId }) {
+  if (!mongoose.isValidObjectId(userId)) throw new Error("Invalid userId");
+
+  const [me, myReferral, latestRequest] = await Promise.all([
+    User.findById(userId).select("ibDashboardEnabled").lean(),
+    Referral.findOne({ user_id: userId }).select("referred_by").lean(),
+    IbRequest.findOne({ requester: userId })
+      .sort({ createdAt: -1 })
+      .populate("requester", USER_SELECT)
+      .populate("ib", USER_SELECT)
+      .lean(),
+  ]);
+
+  let ib = null;
+  if (myReferral?.referred_by) {
+    const ibUser = await User.findById(myReferral.referred_by)
+      .select("name email")
+      .lean();
+    if (ibUser) {
+      ib = { id: String(ibUser._id), name: ibUser.name || "", email: ibUser.email || "" };
+    }
+  }
+
+  return {
+    ibDashboardEnabled: Boolean(me?.ibDashboardEnabled),
+    referredBy: ib,
+    request: serialize(latestRequest),
   };
 }
 

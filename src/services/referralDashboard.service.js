@@ -5,6 +5,9 @@ import Account from "../models/Account.model.js";
 import Deposit from "../models/Deposit.model.js";
 import Withdrawal from "../models/Withdrawal.model.js";
 import Trade from "../models/Trade.model.js";
+import User from "../models/User.model.js";
+import IbRequest from "../models/IbRequest.model.js";
+import Kyc from "../models/Kyc.model.js";
 import { generateReferralCode } from "../utils/referralCode.util.js";
 import { syncMissingReferralRewardsForReferrer } from "./referral.service.js";
 
@@ -159,6 +162,9 @@ export async function getReferralDashboardService({
       payouts: 0,
       accounts: 0,
     },
+    kycStats: { pending: 0, complete: 0 },
+    liveAccountStats: { pending: 0, complete: 0, total: 0 },
+    ibRequestStats: { pending: 0, approved: 0, rejected: 0 },
     referralCode: referral?.referral_code || null,
     linkUsedCount: directIds.length,
   };
@@ -184,6 +190,9 @@ export async function getReferralDashboardService({
     recentAccounts,
     accountOwners,
     fundedOwners,
+    kycAgg,
+    liveAccountAgg,
+    ibRequestAgg,
   ] = await Promise.all([
     Referral.find({ user_id: { $in: objectIds } })
       .populate("user_id", "name email")
@@ -336,6 +345,23 @@ export async function getReferralDashboardService({
       user: { $in: objectIds },
       status: "APPROVED",
     }),
+    User.aggregate([
+      { $match: { _id: { $in: objectIds } } },
+      { $group: { _id: "$kycStatus", count: { $sum: 1 } } },
+    ]),
+    Account.aggregate([
+      {
+        $match: {
+          user_id: { $in: objectIds },
+          account_type: "live",
+        },
+      },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
+    IbRequest.aggregate([
+      { $match: { ib: new mongoose.Types.ObjectId(userId) } },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
   ]);
 
   const newClients = profiles.filter((p) =>
@@ -371,6 +397,41 @@ export async function getReferralDashboardService({
         account_type: "live",
       }),
     ]);
+
+  const KYC_COMPLETE = new Set(["VERIFIED", "APPROVED", "COMPLETED"]);
+  const KYC_PENDING = new Set([
+    "PENDING",
+    "SUBMITTED",
+    "IN_REVIEW",
+    "UNDER_REVIEW",
+    "PROCESSING",
+  ]);
+  let kycPending = 0;
+  let kycComplete = 0;
+  for (const row of kycAgg || []) {
+    const status = String(row._id || "").toUpperCase();
+    if (KYC_COMPLETE.has(status)) kycComplete += Number(row.count || 0);
+    else if (KYC_PENDING.has(status)) kycPending += Number(row.count || 0);
+  }
+
+  let livePending = 0;
+  let liveComplete = 0;
+  for (const row of liveAccountAgg || []) {
+    const status = String(row._id || "").toLowerCase();
+    const count = Number(row.count || 0);
+    if (status === "active") liveComplete += count;
+    else livePending += count;
+  }
+  const liveTotal = livePending + liveComplete;
+
+  const ibRequestStats = { pending: 0, approved: 0, rejected: 0 };
+  for (const row of ibRequestAgg || []) {
+    const status = String(row._id || "").toUpperCase();
+    const count = Number(row.count || 0);
+    if (status === "PENDING") ibRequestStats.pending = count;
+    else if (status === "APPROVED") ibRequestStats.approved = count;
+    else if (status === "REJECTED") ibRequestStats.rejected = count;
+  }
 
   return {
     referralCode: referral?.referral_code || null,
@@ -444,6 +505,477 @@ export async function getReferralDashboardService({
       payouts: Number(payoutsTotal || 0),
       accounts: Number(accountsTotal || 0),
     },
+    kycStats: { pending: kycPending, complete: kycComplete },
+    liveAccountStats: {
+      pending: livePending,
+      complete: liveComplete,
+      total: liveTotal,
+    },
+    ibRequestStats,
+  };
+}
+
+function buildDateFilter(from, to) {
+  const filter = {};
+  if (from) {
+    const d = new Date(from);
+    if (!Number.isNaN(d.getTime())) filter.$gte = d;
+  }
+  if (to) {
+    const d = new Date(to);
+    if (!Number.isNaN(d.getTime())) {
+      d.setHours(23, 59, 59, 999);
+      filter.$lte = d;
+    }
+  }
+  return Object.keys(filter).length ? filter : null;
+}
+
+function paginationOf(page, limit, total) {
+  return {
+    page,
+    limit,
+    total,
+    totalPages: Math.max(Math.ceil(total / limit), 1),
+  };
+}
+
+/** IB portal: paginated deposits of the whole referral network. */
+export async function listNetworkDepositsService({
+  userId,
+  from = null,
+  to = null,
+  method = "",
+  status = "",
+  page = 1,
+  limit = 20,
+}) {
+  if (!mongoose.isValidObjectId(userId)) throw new Error("Invalid userId");
+  const { scopeIds } = await collectScopeUserIds(userId, "total");
+  const objectIds = scopeIds.map((id) => new mongoose.Types.ObjectId(id));
+
+  const safePage = Math.max(Number(page) || 1, 1);
+  const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+  const skip = (safePage - 1) * safeLimit;
+
+  const filter = { user: { $in: objectIds } };
+  if (method) filter.method = String(method).toUpperCase();
+  if (status) filter.status = String(status).toUpperCase();
+  const dateFilter = buildDateFilter(from, to);
+  if (dateFilter) filter.createdAt = dateFilter;
+
+  const [items, total, agg] = await Promise.all([
+    Deposit.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(safeLimit)
+      .populate("user", "name email")
+      .populate("account", "account_number account_type")
+      .lean(),
+    Deposit.countDocuments(filter),
+    Deposit.aggregate([
+      { $match: filter },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]),
+  ]);
+
+  return {
+    items: items.map((d) => ({
+      id: String(d._id),
+      user: {
+        name: d.user?.name || "User",
+        email: d.user?.email || "",
+      },
+      accountNumber: d.account?.account_number || "",
+      accountType: d.account?.account_type || "",
+      amount: Number(d.amount || 0),
+      method: d.method,
+      bonusAmount: Number(d.bonus_amount || 0),
+      bonusPercent: Number(d.bonus_percent || 0),
+      status: d.status,
+      proofImage: d.proof?.image_url || "",
+      rejectionReason: d.rejectionReason || "",
+      createdAt: d.createdAt,
+    })),
+    pagination: paginationOf(safePage, safeLimit, total),
+    totalAmount: Number(agg[0]?.total || 0),
+  };
+}
+
+/** IB portal: paginated withdrawals of the whole referral network. */
+export async function listNetworkWithdrawalsService({
+  userId,
+  from = null,
+  to = null,
+  method = "",
+  status = "",
+  page = 1,
+  limit = 20,
+}) {
+  if (!mongoose.isValidObjectId(userId)) throw new Error("Invalid userId");
+  const { scopeIds } = await collectScopeUserIds(userId, "total");
+  const objectIds = scopeIds.map((id) => new mongoose.Types.ObjectId(id));
+
+  const safePage = Math.max(Number(page) || 1, 1);
+  const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+  const skip = (safePage - 1) * safeLimit;
+
+  const filter = { user: { $in: objectIds } };
+  if (method) filter.method = String(method).toUpperCase();
+  if (status) {
+    const s = String(status).toUpperCase();
+    if (s === "APPROVED") filter.status = { $in: ["APPROVED", "COMPLETED"] };
+    else if (s === "REJECTED") filter.status = { $in: ["REJECTED", "FAILED"] };
+    else if (s === "PENDING") filter.status = { $in: ["PENDING", "PROCESSING"] };
+    else filter.status = s;
+  }
+  const dateFilter = buildDateFilter(from, to);
+  if (dateFilter) filter.createdAt = dateFilter;
+
+  const [items, total, agg] = await Promise.all([
+    Withdrawal.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(safeLimit)
+      .populate("user", "name email")
+      .populate("account", "account_number account_type")
+      .lean(),
+    Withdrawal.countDocuments(filter),
+    Withdrawal.aggregate([
+      { $match: filter },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]),
+  ]);
+
+  return {
+    items: items.map((w) => ({
+      id: String(w._id),
+      user: {
+        name: w.user?.name || "User",
+        email: w.user?.email || "",
+      },
+      accountNumber: w.account?.account_number || "",
+      accountType: w.account?.account_type || "",
+      amount: Number(w.amount || 0),
+      method: w.method,
+      source: w.source || "ACCOUNT",
+      payout: w.payout || {},
+      status: w.status,
+      rejectionReason: w.rejectionReason || "",
+      createdAt: w.createdAt,
+    })),
+    pagination: paginationOf(safePage, safeLimit, total),
+    totalAmount: Number(agg[0]?.total || 0),
+  };
+}
+
+/**
+ * IB portal: flat member list of the whole referral network with level,
+ * trading stats, deposits, withdrawals and commission. Search + level filter.
+ */
+export async function listNetworkMembersService({
+  userId,
+  q = "",
+  level = "",
+  page = 1,
+  limit = 20,
+}) {
+  if (!mongoose.isValidObjectId(userId)) throw new Error("Invalid userId");
+  const { scopeIds } = await collectScopeUserIds(userId, "total");
+  const objectIds = scopeIds.map((id) => new mongoose.Types.ObjectId(id));
+
+  const referrals = await Referral.find({ user_id: { $in: objectIds } })
+    .select("user_id referral_code referred_by status createdAt")
+    .lean();
+
+  const refByUser = new Map();
+  const childrenMap = new Map();
+  for (const r of referrals) {
+    const uid = String(r.user_id);
+    refByUser.set(uid, r);
+    const pid = r.referred_by ? String(r.referred_by) : null;
+    if (pid) {
+      if (!childrenMap.has(pid)) childrenMap.set(pid, []);
+      childrenMap.get(pid).push(uid);
+    }
+  }
+
+  // BFS levels from root
+  const levelMap = new Map([[String(userId), 0]]);
+  const queue = [String(userId)];
+  while (queue.length) {
+    const cur = queue.shift();
+    const curLevel = levelMap.get(cur) ?? 0;
+    for (const child of childrenMap.get(cur) || []) {
+      if (!levelMap.has(child)) {
+        levelMap.set(child, curLevel + 1);
+        queue.push(child);
+      }
+    }
+  }
+
+  const safePage = Math.max(Number(page) || 1, 1);
+  const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+  const skip = (safePage - 1) * safeLimit;
+
+  const levelFilter = level !== "" && level !== null && level !== undefined
+    ? Number(level)
+    : null;
+  const search = String(q || "").trim().toLowerCase();
+
+  let memberIds = scopeIds.filter((id) => id !== String(userId));
+  if (levelFilter !== null && Number.isFinite(levelFilter)) {
+    memberIds = memberIds.filter((id) => (levelMap.get(id) ?? -1) === levelFilter);
+  }
+
+  // Fetch users for all filtered members so search works before pagination
+  const allMemberObjectIds = memberIds.map((id) => new mongoose.Types.ObjectId(id));
+  const allUsers = await User.find({ _id: { $in: allMemberObjectIds } })
+    .select("name email createdAt userType ibDashboardEnabled kycStatus")
+    .lean();
+  const allUserMap = new Map(allUsers.map((u) => [String(u._id), u]));
+
+  let filteredIds = memberIds.filter((id) => allUserMap.has(id));
+  if (search) {
+    filteredIds = filteredIds.filter((id) => {
+      const u = allUserMap.get(id);
+      const r = refByUser.get(id);
+      const hay = `${u?.name || ""} ${u?.email || ""} ${r?.referral_code || ""}`.toLowerCase();
+      return hay.includes(search);
+    });
+  }
+
+  const total = filteredIds.length;
+  const pageIds = filteredIds.slice(skip, skip + safeLimit);
+  const pageObjectIds = pageIds.map((id) => new mongoose.Types.ObjectId(id));
+
+  const [depAgg, wdAgg, lotAgg, commAgg] = await Promise.all([
+    User.find({ _id: { $in: pageObjectIds } })
+      .select("name email createdAt userType ibDashboardEnabled kycStatus")
+      .lean(),
+    Deposit.aggregate([
+      { $match: { user: { $in: pageObjectIds }, status: "APPROVED" } },
+      { $group: { _id: "$user", total: { $sum: "$amount" } } },
+    ]),
+    Withdrawal.aggregate([
+      {
+        $match: {
+          user: { $in: pageObjectIds },
+          status: { $in: ["APPROVED", "COMPLETED"] },
+        },
+      },
+      { $group: { _id: "$user", total: { $sum: "$amount" } } },
+    ]),
+    Trade.aggregate([
+      {
+        $match: {
+          userId: { $in: pageObjectIds },
+          status: { $in: ["CLOSED", "OPEN", "CLOSING"] },
+        },
+      },
+      { $group: { _id: "$userId", lots: { $sum: "$volume" } } },
+    ]),
+    ReferralReward.aggregate([
+      {
+        $match: {
+          referrer_user: { $in: pageObjectIds },
+          status: { $in: ["ELIGIBLE", "REQUESTED", "APPROVED"] },
+        },
+      },
+      { $group: { _id: "$referrer_user", total: { $sum: "$reward_amount" } } },
+    ]),
+  ]);
+
+  const depMap = new Map(depAgg.map((d) => [String(d._id), Number(d.total || 0)]));
+  const wdMap = new Map(wdAgg.map((d) => [String(d._id), Number(d.total || 0)]));
+  const lotMap = new Map(lotAgg.map((d) => [String(d._id), Number(d.lots || 0)]));
+  const commMap = new Map(commAgg.map((d) => [String(d._id), Number(d.total || 0)]));
+
+  const rows = pageIds
+    .map((id) => {
+      const u = allUserMap.get(id);
+      if (!u) return null;
+      const r = refByUser.get(id) || {};
+      const isIb = Boolean(u.ibDashboardEnabled) || (childrenMap.get(id) || []).length > 0;
+      return {
+        id,
+        name: u.name || "User",
+        email: u.email || "",
+        level: levelMap.get(id) ?? 0,
+        referralCode: r.referral_code || "—",
+        userType: isIb ? "IB" : "Client",
+        lots: lotMap.get(id) || 0,
+        commission: commMap.get(id) || 0,
+        totalDeposit: depMap.get(id) || 0,
+        totalWithdrawal: wdMap.get(id) || 0,
+        registeredAt: u.createdAt || r.createdAt || null,
+        remark: r.status || "—",
+        kycStatus: u.kycStatus || "NOT_STARTED",
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    items: rows,
+    pagination: paginationOf(safePage, safeLimit, total),
+    levels: [...new Set([...levelMap.values()])].sort((a, b) => a - b),
+  };
+}
+
+/**
+ * IB portal: KYC records of the whole referral network.
+ * Columns: name, email, mobile, KYC type, request date, action date,
+ * action by, user type, status. Search + status filter + pagination.
+ */
+export async function listNetworkKycService({
+  userId,
+  q = "",
+  status = "",
+  page = 1,
+  limit = 20,
+}) {
+  if (!mongoose.isValidObjectId(userId)) throw new Error("Invalid userId");
+  const { scopeIds } = await collectScopeUserIds(userId, "total");
+  const objectIds = scopeIds.map((id) => new mongoose.Types.ObjectId(id));
+
+  const safePage = Math.max(Number(page) || 1, 1);
+  const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+  const skip = (safePage - 1) * safeLimit;
+  const search = String(q || "").trim().toLowerCase();
+
+  const filter = { user: { $in: objectIds } };
+  const st = String(status || "").toUpperCase();
+  if (["PENDING", "VERIFIED", "REJECTED"].includes(st)) filter.status = st;
+
+  // Search needs user fields -> fetch matching user ids first
+  let userFilter = null;
+  if (search) {
+    const matchedUsers = await User.find({
+      _id: { $in: objectIds },
+      $or: [
+        { name: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+        { phone: { $regex: search, $options: "i" } },
+      ],
+    })
+      .select("_id")
+      .lean();
+    userFilter = matchedUsers.map((u) => u._id);
+    filter.user = { $in: userFilter.length ? userFilter : [new mongoose.Types.ObjectId("000000000000000000000000")] };
+  }
+
+  const [items, total, counts] = await Promise.all([
+    Kyc.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(safeLimit)
+      .populate("user", "name email phone ibDashboardEnabled")
+      .lean(),
+    Kyc.countDocuments(filter),
+    Kyc.aggregate([
+      { $match: { user: { $in: objectIds } } },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
+  ]);
+
+  const statusCounts = { PENDING: 0, VERIFIED: 0, REJECTED: 0 };
+  for (const c of counts) {
+    if (c._id && statusCounts[c._id] !== undefined) statusCounts[c._id] = c.count;
+  }
+
+  return {
+    items: items.map((k) => ({
+      id: String(k._id),
+      name: k.user?.name || "User",
+      email: k.user?.email || "",
+      phone: k.user?.phone || "",
+      kycType: k.documentType || "—",
+      requestDate: k.createdAt,
+      actionDate: k.status === "PENDING" ? null : k.updatedAt,
+      actionBy: k.status === "PENDING" ? "—" : "Admin",
+      userType: k.user?.ibDashboardEnabled ? "IB" : "Client",
+      status: k.status,
+      remark: k.status === "REJECTED" ? k.rejectionReason || "—" : "—",
+      documents: {
+        front: k.documents?.front?.image_url || "",
+        back: k.documents?.back?.image_url || "",
+        selfie: k.documents?.selfie?.image_url || "",
+      },
+    })),
+    statusCounts,
+    pagination: paginationOf(safePage, safeLimit, total),
+  };
+}
+
+/**
+ * IB portal: live trading accounts of the referral network.
+ * Total balance box + table with request time, action by, remark.
+ */
+export async function listNetworkAccountsService({
+  userId,
+  q = "",
+  page = 1,
+  limit = 20,
+}) {
+  if (!mongoose.isValidObjectId(userId)) throw new Error("Invalid userId");
+  const { scopeIds } = await collectScopeUserIds(userId, "total");
+  const objectIds = scopeIds.map((id) => new mongoose.Types.ObjectId(id));
+
+  const safePage = Math.max(Number(page) || 1, 1);
+  const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+  const skip = (safePage - 1) * safeLimit;
+  const search = String(q || "").trim().toLowerCase();
+
+  const filter = { user_id: { $in: objectIds }, account_type: "live" };
+  if (search) {
+    filter.$or = [
+      { account_number: { $regex: search, $options: "i" } },
+      { plan_name: { $regex: search, $options: "i" } },
+    ];
+  }
+
+  const [items, total, balanceAgg] = await Promise.all([
+    Account.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(safeLimit)
+      .populate("user_id", "name email phone ibDashboardEnabled")
+      .lean(),
+    Account.countDocuments(filter),
+    Account.aggregate([
+      {
+        $match: {
+          user_id: { $in: objectIds },
+          account_type: "live",
+          status: "active",
+        },
+      },
+      { $group: { _id: null, total: { $sum: "$balance" } } },
+    ]),
+  ]);
+
+  return {
+    items: items.map((a) => ({
+      id: String(a._id),
+      name: a.user_id?.name || "User",
+      email: a.user_id?.email || "",
+      phone: a.user_id?.phone || "",
+      accountNumber: a.account_number,
+      accountType: a.account_type,
+      leverage: a.leverage ? `1:${a.leverage}` : "—",
+      balance: Number(a.balance || 0),
+      currency: a.currency || "USD",
+      requestTime: a.createdAt,
+      actionBy: "System",
+      userType: a.user_id?.ibDashboardEnabled ? "IB" : "Client",
+      remark: `${a.plan_name || "—"} · ${a.status || "active"}`,
+      status: a.status,
+      planName: a.plan_name || "",
+      equity: Number(a.equity || 0),
+      bonusBalance: Number(a.bonus_balance || 0),
+    })),
+    totalBalance: Number(balanceAgg[0]?.total || 0),
+    pagination: paginationOf(safePage, safeLimit, total),
   };
 }
 
@@ -459,7 +991,7 @@ export async function getMyReferralTreeService({ userId, maxDepth = 6 }) {
   const MAX_NODES = 400;
 
   const root = await Referral.findOne({ user_id: userId })
-    .populate("user_id", "name email")
+    .populate("user_id", "name email phone")
     .lean();
 
   // level -> map parentId -> children[]
@@ -469,6 +1001,7 @@ export async function getMyReferralTreeService({ userId, maxDepth = 6 }) {
     userId: rootId,
     name: root?.user_id?.name || "You",
     email: root?.user_id?.email || "",
+    phone: root?.user_id?.phone || "",
     level: 0,
     children: [],
   });
@@ -482,7 +1015,7 @@ export async function getMyReferralTreeService({ userId, maxDepth = 6 }) {
     const kids = await Referral.find({
       referred_by: { $in: batch.map((id) => new mongoose.Types.ObjectId(id)) },
     })
-      .populate("user_id", "name email")
+      .populate("user_id", "name email phone")
       .select("user_id referred_by createdAt")
       .lean();
 
@@ -498,6 +1031,7 @@ export async function getMyReferralTreeService({ userId, maxDepth = 6 }) {
         userId: kidId,
         name: k.user_id?.name || "User",
         email: k.user_id?.email || "",
+        phone: k.user_id?.phone || "",
         level: level + 1,
         children: [],
       };

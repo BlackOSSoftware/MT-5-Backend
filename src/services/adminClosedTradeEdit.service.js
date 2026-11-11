@@ -63,6 +63,8 @@ export async function adminEditClosedTradeService(body = {}, { actorId } = {}) {
       swap: trade.swap,
       realizedPnL: trade.realizedPnL,
       closeReason: trade.closeReason,
+      openTime: trade.openTime,
+      closeTime: trade.closeTime,
     },
     normalized
   );
@@ -96,6 +98,8 @@ export async function adminEditClosedTradeService(body = {}, { actorId } = {}) {
   } catch {
     trade.closeReason = "MANUAL";
   }
+  if (merged.openTime !== undefined) trade.openTime = merged.openTime;
+  if (merged.closeTime !== undefined) trade.closeTime = merged.closeTime;
   await trade.save();
 
   if (delta !== 0) {

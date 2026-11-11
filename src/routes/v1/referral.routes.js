@@ -17,6 +17,12 @@ import {
   adminGetReferralTree,
   adminGetUserReferralSummary,
   getMyReferralTree,
+  listMyNetworkDeposits,
+  listMyNetworkWithdrawals,
+  listMyNetworkMembers,
+  listMyNetworkKyc,
+  listMyNetworkAccounts,
+  getMyIbRequestStatus,
   createMySubIbRequest,
   getMySubIbRequest,
   listSubIbRequests,
@@ -32,6 +38,14 @@ router.get("/rewards", authMiddleware, requireIbDashboardAccess, listMyReferralR
 router.get("/mine", authMiddleware, requireIbDashboardAccess, listMyDirectReferrals);
 router.post("/request", authMiddleware, requireIbDashboardAccess, requestReferralReward);
 router.get("/tree", authMiddleware, requireIbDashboardAccess, getMyReferralTree);
+router.get("/deposits", authMiddleware, requireIbDashboardAccess, listMyNetworkDeposits);
+router.get("/withdrawals", authMiddleware, requireIbDashboardAccess, listMyNetworkWithdrawals);
+router.get("/members", authMiddleware, requireIbDashboardAccess, listMyNetworkMembers);
+router.get("/kyc", authMiddleware, requireIbDashboardAccess, listMyNetworkKyc);
+router.get("/accounts", authMiddleware, requireIbDashboardAccess, listMyNetworkAccounts);
+// Referred clients (no IB gate) — request IB dashboard access from their referrer
+router.get("/ib-request-status", authMiddleware, getMyIbRequestStatus);
+router.post("/ib-request", authMiddleware, createMySubIbRequest);
 router.post("/sub-ib-request", authMiddleware, requireIbDashboardAccess, createMySubIbRequest);
 router.get("/sub-ib-request/mine", authMiddleware, requireIbDashboardAccess, getMySubIbRequest);
 router.get("/sub-ib-requests", authMiddleware, requireIbDashboardAccess, listSubIbRequests);

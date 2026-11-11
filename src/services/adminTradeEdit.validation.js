@@ -13,6 +13,16 @@ export function parseOptionalNumber(value, fieldName) {
   return { kind: "set", value: n };
 }
 
+export function parseOptionalDateTime(value, fieldName) {
+  if (value === undefined) return { kind: "omit" };
+  if (value === null || value === "") return { kind: "clear" };
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    throw new Error(`Invalid ${fieldName}`);
+  }
+  return { kind: "set", value: d };
+}
+
 export function resolveOptionalField(parsed, current) {
   if (parsed.kind === "omit") return current;
   if (parsed.kind === "clear") return null;
@@ -186,6 +196,13 @@ export function normalizeClosedTradeEdit(body = {}) {
     }
   }
 
+  const openTime = parseOptionalDateTime(body.openTime, "openTime");
+  const closeTime = parseOptionalDateTime(body.closeTime, "closeTime");
+  if (openTime.kind !== "omit" || closeTime.kind !== "omit") any = true;
+  if (openTime.kind === "clear") {
+    throw new Error("openTime cannot be cleared");
+  }
+
   if (!any) {
     throw new Error("At least one editable closed-trade field is required");
   }
@@ -199,7 +216,7 @@ export function normalizeClosedTradeEdit(body = {}) {
     }
   }
 
-  return { ...parsed, closeReason };
+  return { ...parsed, closeReason, openTime, closeTime };
 }
 
 export function mergeClosedTradeFields(existing, normalized) {
@@ -231,6 +248,19 @@ export function mergeClosedTradeFields(existing, normalized) {
       next.closeReason = normalized.closeReason.value;
     }
   }
+
+  const applyDate = (key, allowNull = false) => {
+    const p = normalized[key];
+    if (!p || p.kind === "omit") return;
+    if (p.kind === "clear") {
+      next[key] = allowNull ? null : next[key];
+      return;
+    }
+    next[key] = p.value;
+  };
+
+  applyDate("openTime");
+  applyDate("closeTime", true);
 
   return next;
 }

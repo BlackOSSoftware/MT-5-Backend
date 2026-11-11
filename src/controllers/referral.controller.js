@@ -8,11 +8,20 @@ import {
   adminApproveReferralRewardService,
   adminRejectReferralRewardService,
 } from "../services/referral.service.js";
-import { getReferralDashboardService, getMyReferralTreeService } from "../services/referralDashboard.service.js";
+import {
+  getReferralDashboardService,
+  getMyReferralTreeService,
+  listNetworkDepositsService,
+  listNetworkWithdrawalsService,
+  listNetworkMembersService,
+  listNetworkKycService,
+  listNetworkAccountsService,
+} from "../services/referralDashboard.service.js";
 import {
   createSubIbRequestService,
   listSubIbRequestsService,
   getMySubIbRequestService,
+  getIbRequestStatusService,
   respondSubIbRequestService,
 } from "../services/ibRequest.service.js";
 import {
@@ -261,6 +270,67 @@ export async function adminGetReferralTree(req, res) {
   }
 }
 
+export async function listMyNetworkDeposits(req, res) {
+  try {
+    const { from, to, method, status, page = 1, limit = 20 } = req.query;
+    const data = await listNetworkDepositsService({
+      userId: req.user._id,
+      from,
+      to,
+      method,
+      status,
+      page,
+      limit,
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      message: err?.message || "Failed to load deposits",
+    });
+  }
+}
+
+export async function listMyNetworkWithdrawals(req, res) {
+  try {
+    const { from, to, method, status, page = 1, limit = 20 } = req.query;
+    const data = await listNetworkWithdrawalsService({
+      userId: req.user._id,
+      from,
+      to,
+      method,
+      status,
+      page,
+      limit,
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      message: err?.message || "Failed to load withdrawals",
+    });
+  }
+}
+
+export async function listMyNetworkMembers(req, res) {
+  try {
+    const { q, level, page = 1, limit = 20 } = req.query;
+    const data = await listNetworkMembersService({
+      userId: req.user._id,
+      q,
+      level,
+      page,
+      limit,
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      message: err?.message || "Failed to load team members",
+    });
+  }
+}
+
 export async function getMyReferralTree(req, res) {
   try {
     const { maxDepth } = req.query;
@@ -268,6 +338,52 @@ export async function getMyReferralTree(req, res) {
       userId: req.user._id,
       maxDepth: maxDepth ? Number(maxDepth) : 6,
     });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function listMyNetworkKyc(req, res) {
+  try {
+    const { q, status, page = 1, limit = 20 } = req.query;
+    const data = await listNetworkKycService({
+      userId: req.user._id,
+      q,
+      status,
+      page,
+      limit,
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      message: err?.message || "Failed to load KYC records",
+    });
+  }
+}
+
+export async function listMyNetworkAccounts(req, res) {
+  try {
+    const { q, page = 1, limit = 20 } = req.query;
+    const data = await listNetworkAccountsService({
+      userId: req.user._id,
+      q,
+      page,
+      limit,
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      message: err?.message || "Failed to load accounts",
+    });
+  }
+}
+
+export async function getMyIbRequestStatus(req, res) {
+  try {
+    const data = await getIbRequestStatusService({ userId: req.user._id });
     return res.status(200).json({ success: true, data });
   } catch (err) {
     return res.status(400).json({ success: false, message: err.message });

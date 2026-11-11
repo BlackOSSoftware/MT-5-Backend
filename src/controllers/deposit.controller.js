@@ -199,7 +199,7 @@ export async function adminEditDepositAmount(req, res) {
 /* ADMIN: CREATE DEPOSIT */
 export async function adminCreateDeposit(req, res) {
   try {
-    const { accountId, amount, method, dateTime } = req.body;
+    const { accountId, amount, method, dateTime, remark } = req.body;
     const proof = req.body?.proof;
     const parsedAmount =
       typeof amount === "number" ? amount : Number(amount);
@@ -214,6 +214,7 @@ export async function adminCreateDeposit(req, res) {
       amount: parsedAmount,
       method,
       dateTime,
+      remark,
       proof,
       adminId: req.user._id,
       ipAddress,

@@ -679,6 +679,9 @@ export async function adminSearchAccounts({ query = {}, brokerId = null }) {
   if (typeof query.status === "string" && query.status.trim()) {
     accountFilter.status = query.status.trim().toLowerCase();
   }
+  if (typeof query.plan_id === "string" && mongoose.isValidObjectId(query.plan_id)) {
+    accountFilter.account_plan_id = new mongoose.Types.ObjectId(query.plan_id);
+  }
 
   const pipeline = [
     { $match: accountFilter },
@@ -767,11 +770,57 @@ export async function adminSearchAccounts({ query = {}, brokerId = null }) {
   const items = result?.[0]?.items || [];
   const total = result?.[0]?.total?.[0]?.count || 0;
 
+  const accountIds = items
+    .map((account) => account._id)
+    .filter(Boolean);
+
+  const [depositAgg, withdrawAgg] = accountIds.length
+    ? await Promise.all([
+        Deposit.aggregate([
+          {
+            $match: {
+              account: { $in: accountIds },
+              status: "APPROVED",
+            },
+          },
+          {
+            $group: {
+              _id: "$account",
+              total: { $sum: "$amount" },
+            },
+          },
+        ]),
+        Withdrawal.aggregate([
+          {
+            $match: {
+              account: { $in: accountIds },
+              status: { $in: ["APPROVED", "COMPLETED"] },
+            },
+          },
+          {
+            $group: {
+              _id: "$account",
+              total: { $sum: "$amount" },
+            },
+          },
+        ]),
+      ])
+    : [[], []];
+
+  const depositMap = new Map(
+    depositAgg.map((row) => [String(row._id), Number(row.total) || 0])
+  );
+  const withdrawMap = new Map(
+    withdrawAgg.map((row) => [String(row._id), Number(row.total) || 0])
+  );
+
   return {
     items: items.map((account) => ({
       ...account,
       total_balance:
         Number(account.balance || 0) + Number(account.bonus_balance || 0),
+      total_deposit: depositMap.get(String(account._id)) || 0,
+      total_withdraw: withdrawMap.get(String(account._id)) || 0,
     })),
     pagination: {
       page,
