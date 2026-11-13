@@ -21,6 +21,7 @@ import {
 import {
   createSubIbRequestService,
   listSubIbRequestsService,
+  listUserIbRequestsService,
   getMySubIbRequestService,
   getIbRequestStatusService,
   respondSubIbRequestService,
@@ -70,6 +71,76 @@ export async function getMyReferralDashboard(req, res) {
     return res.status(200).json({ success: true, data });
   } catch (err) {
     return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function adminGetUserIbDashboard(req, res) {
+  try {
+    const brokerId = req.brokerId || null;
+    await assertUserBelongsToBroker(req.params.userId, brokerId);
+    const { scope, period, from, to } = req.query;
+    const data = await getReferralDashboardService({
+      userId: req.params.userId,
+      scope,
+      period,
+      from,
+      to,
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(err.status || 400).json({ success: false, message: err.message });
+  }
+}
+
+export async function adminListUserIbKyc(req, res) {
+  try {
+    const brokerId = req.brokerId || null;
+    await assertUserBelongsToBroker(req.params.userId, brokerId);
+    const { q, status, page = 1, limit = 20 } = req.query;
+    const data = await listNetworkKycService({
+      userId: req.params.userId,
+      q,
+      status,
+      page,
+      limit,
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(err.status || 400).json({ success: false, message: err.message });
+  }
+}
+
+export async function adminListUserIbAccounts(req, res) {
+  try {
+    const brokerId = req.brokerId || null;
+    await assertUserBelongsToBroker(req.params.userId, brokerId);
+    const { q, page = 1, limit = 20 } = req.query;
+    const data = await listNetworkAccountsService({
+      userId: req.params.userId,
+      q,
+      page,
+      limit,
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(err.status || 400).json({ success: false, message: err.message });
+  }
+}
+
+export async function adminListUserIbRequests(req, res) {
+  try {
+    const brokerId = req.brokerId || null;
+    await assertUserBelongsToBroker(req.params.userId, brokerId);
+    const { status, page = 1, limit = 50 } = req.query;
+    const result = await listUserIbRequestsService({
+      userId: req.params.userId,
+      status,
+      page: Number(page),
+      limit: Number(limit),
+    });
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    return res.status(err.status || 400).json({ success: false, message: err.message });
   }
 }
 

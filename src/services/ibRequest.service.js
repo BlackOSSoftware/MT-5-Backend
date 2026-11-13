@@ -125,6 +125,73 @@ export async function listSubIbRequestsService({ ibId, status = "", page = 1, li
 }
 
 /**
+ * Admin: all Sub-IB requests related to a user — both as the IB
+ * (requests they received) and as the requester (requests they sent).
+ */
+export async function listUserIbRequestsService({
+  userId,
+  status = "",
+  page = 1,
+  limit = 50,
+}) {
+  if (!mongoose.isValidObjectId(userId)) throw new Error("Invalid userId");
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 50));
+
+  const filter = {
+    $or: [{ ib: userId }, { requester: userId }],
+  };
+  if (["PENDING", "APPROVED", "REJECTED"].includes(String(status).toUpperCase())) {
+    filter.status = String(status).toUpperCase();
+  }
+
+  const [items, total, counts] = await Promise.all([
+    IbRequest.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .populate("requester", USER_SELECT)
+      .populate("ib", USER_SELECT)
+      .populate("respondedBy", "name email")
+      .lean(),
+    IbRequest.countDocuments(filter),
+    IbRequest.aggregate([
+      {
+        $match: {
+          $or: [
+            { ib: new mongoose.Types.ObjectId(userId) },
+            { requester: new mongoose.Types.ObjectId(userId) },
+          ],
+        },
+      },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
+  ]);
+
+  const statusCounts = { PENDING: 0, APPROVED: 0, REJECTED: 0 };
+  for (const c of counts) {
+    if (c._id && statusCounts[c._id] !== undefined) statusCounts[c._id] = c.count;
+  }
+
+  return {
+    items: items.map((doc) => ({
+      ...serialize(doc),
+      direction:
+        String(doc.ib?._id || doc.ib) === String(userId)
+          ? "RECEIVED"
+          : "SENT",
+    })),
+    statusCounts,
+    pagination: {
+      page: safePage,
+      limit: safeLimit,
+      total,
+      totalPages: total === 0 ? 0 : Math.ceil(total / safeLimit),
+    },
+  };
+}
+
+/**
  * Status for a referred client: who their IB is + latest request + access flag.
  * Safe for non-IB users (no IB dashboard gate needed).
  */

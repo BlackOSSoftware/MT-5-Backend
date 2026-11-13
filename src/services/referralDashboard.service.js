@@ -194,6 +194,7 @@ export async function getReferralDashboardService({
     kycAgg,
     liveAccountAgg,
     ibRequestAgg,
+    ibCommAgg,
   ] = await Promise.all([
     Referral.find({ user_id: { $in: objectIds } })
       .populate("user_id", "name email")
@@ -363,6 +364,21 @@ export async function getReferralDashboardService({
       { $match: { ib: new mongoose.Types.ObjectId(userId) } },
       { $group: { _id: "$status", count: { $sum: 1 } } },
     ]),
+    IbCommission.aggregate([
+      {
+        $match: {
+          ib_user_id: new mongoose.Types.ObjectId(userId),
+          status: { $in: ["PENDING", "AVAILABLE", "PAID", "CLAWBACK_PENDING"] },
+        },
+      },
+      {
+        $group: {
+          _id: "$status",
+          total: { $sum: "$amount" },
+          paid: { $sum: "$paid_amount" },
+        },
+      },
+    ]),
   ]);
 
   const newClients = profiles.filter((p) =>
@@ -458,15 +474,37 @@ export async function getReferralDashboardService({
       openedAccount: (accountOwners || []).length,
       fundedAccounts: (fundedOwners || []).length,
     },
-    commission: {
-      totalEarned: Number(referral?.total_earned) || 0,
-      paidOut: Number(paidAgg[0]?.total || 0),
-      // ELIGIBLE = ready to request; REQUESTED = waiting admin (included in pending)
-      pending:
+    commission: (() => {
+      // Lot-wise IB commission ledger is the source of truth.
+      let ibTotal = 0;
+      let ibPaid = 0;
+      let ibPending = 0;
+      let ibAvailable = 0;
+      for (const row of ibCommAgg || []) {
+        const status = String(row._id || "").toUpperCase();
+        const total = Number(row.total || 0);
+        const paidPart = Number(row.paid || 0);
+        ibTotal += total;
+        if (status === "PAID") {
+          ibPaid += total;
+        } else {
+          ibPending += Math.max(0, total - paidPart);
+          if (status === "AVAILABLE") {
+            ibAvailable += Math.max(0, total - paidPart);
+          }
+        }
+      }
+      const legacyPending =
         Number(pendingAgg[0]?.total || 0) +
-        Number(requestedAgg[0]?.total || 0),
-      available: Number(pendingAgg[0]?.total || 0),
-    },
+        Number(requestedAgg[0]?.total || 0);
+      const legacyAvailable = Number(pendingAgg[0]?.total || 0);
+      return {
+        totalEarned: ibTotal || Number(referral?.total_earned) || 0,
+        paidOut: ibPaid || Number(paidAgg[0]?.total || 0),
+        pending: ibPending || legacyPending,
+        available: ibAvailable || legacyAvailable,
+      };
+    })(),
     recentDeposits: (recentDeposits || []).map((d) => ({
       id: String(d._id),
       name: d.user?.name || "User",
@@ -773,14 +811,14 @@ export async function listNetworkMembersService({
       },
       { $group: { _id: "$userId", lots: { $sum: "$volume" } } },
     ]),
-    ReferralReward.aggregate([
+    IbCommission.aggregate([
       {
         $match: {
-          referrer_user: { $in: pageObjectIds },
-          status: { $in: ["ELIGIBLE", "REQUESTED", "APPROVED"] },
+          ib_user_id: { $in: pageObjectIds },
+          status: { $in: ["PENDING", "AVAILABLE", "PAID", "CLAWBACK_PENDING"] },
         },
       },
-      { $group: { _id: "$referrer_user", total: { $sum: "$reward_amount" } } },
+      { $group: { _id: "$ib_user_id", total: { $sum: "$amount" } } },
     ]),
   ]);
 

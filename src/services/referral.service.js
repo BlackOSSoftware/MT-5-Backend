@@ -6,6 +6,7 @@ import AccountPlan from "../models/AccountPlan.model.js";
 import Deposit from "../models/Deposit.model.js";
 import Transaction from "../models/Transaction.model.js";
 import User from "../models/User.model.js";
+import IbCommission from "../models/IbCommission.model.js";
 import WalletTransaction from "../models/WalletTransaction.model.js";
 import { generateReferralCode } from "../utils/referralCode.util.js";
 import EngineSync from "../trade-engine/EngineSync.js";
@@ -37,29 +38,57 @@ async function ensureReferralProfile(userId, session = null) {
 }
 
 async function buildReferralSummaryPayload(userId, referral) {
-  const pendingAgg = await ReferralReward.aggregate([
-    {
-      $match: {
-        referrer_user: new mongoose.Types.ObjectId(userId),
-        status: { $in: ["ELIGIBLE", "REQUESTED"] },
+  const objectId = new mongoose.Types.ObjectId(userId);
+  const [pendingAgg, directAgg, ibAgg] = await Promise.all([
+    ReferralReward.aggregate([
+      {
+        $match: {
+          referrer_user: objectId,
+          status: { $in: ["ELIGIBLE", "REQUESTED"] },
+        },
       },
-    },
-    {
-      $group: {
-        _id: null,
-        count: { $sum: 1 },
-        amount: { $sum: "$reward_amount" },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          amount: { $sum: "$reward_amount" },
+        },
       },
-    },
+    ]),
+    Referral.aggregate([
+      { $match: { referred_by: objectId } },
+      { $group: { _id: null, count: { $sum: 1 } } },
+    ]),
+    IbCommission.aggregate([
+      {
+        $match: {
+          ib_user_id: objectId,
+          status: { $in: ["PENDING", "AVAILABLE", "PAID", "CLAWBACK_PENDING"] },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: "$amount" },
+          remaining: {
+            $sum: { $subtract: ["$amount", { $ifNull: ["$paid_amount", 0] }] },
+          },
+        },
+      },
+    ]),
   ]);
 
   const pending = pendingAgg?.[0] || { count: 0, amount: 0 };
+  const ib = ibAgg?.[0] || null;
+  const ibTotal = Number(ib?.total || 0);
+  const ibRemaining = Math.max(0, Number(ib?.remaining || 0));
+  const directCount = Number(directAgg?.[0]?.count || 0);
 
   return {
     referralCode: referral?.referral_code || null,
-    totalReferrals: referral?.total_referrals || 0,
-    referralBalance: referral?.referral_balance || 0,
-    totalEarned: referral?.total_earned || 0,
+    totalReferrals: directCount || referral?.total_referrals || 0,
+    referralBalance: ib ? ibRemaining : referral?.referral_balance || 0,
+    totalEarned: ibTotal || referral?.total_earned || 0,
     pendingCount: pending.count || 0,
     pendingAmount: pending.amount || 0,
     status: referral?.status || null,

@@ -566,6 +566,7 @@ export async function adminGetUserProfileService(userId) {
         userType: 1,
         isMailVerified: 1,
         kycStatus: 1,
+        ibDashboardEnabled: 1,
         wallet_balance: 1,
         wallet_hold_balance: 1,
         createdAt: 1,
@@ -584,7 +585,24 @@ export async function adminGetUserProfileService(userId) {
     }
   ]);
 
-  return result.length ? result[0] : null;
+  if (!result.length) return null;
+
+  // Trading wallet = sum of live account balances (same figure the client
+  // portal shows as "wallet balance"). Client wallet stays in wallet_balance.
+  const [tradingAgg] = await Account.aggregate([
+    {
+      $match: {
+        user_id: new mongoose.Types.ObjectId(userId),
+        account_type: 'live',
+      },
+    },
+    { $group: { _id: null, total: { $sum: '$balance' } } },
+  ]);
+
+  return {
+    ...result[0],
+    trading_balance: Number(tradingAgg?.total || 0),
+  };
 }
 
 export async function adminDeleteUserService(userId) {

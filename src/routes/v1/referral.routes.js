@@ -17,6 +17,10 @@ import {
   adminListReferralLinks,
   adminGetReferralTree,
   adminGetUserReferralSummary,
+  adminGetUserIbDashboard,
+  adminListUserIbKyc,
+  adminListUserIbAccounts,
+  adminListUserIbRequests,
   getMyReferralTree,
   listMyNetworkDeposits,
   listMyNetworkWithdrawals,
@@ -63,6 +67,26 @@ router.get(
   "/admin/users/:userId/summary",
   brokerAdminAuth,
   adminGetUserReferralSummary,
+);
+router.get(
+  "/admin/users/:userId/ib-dashboard",
+  brokerAdminAuth,
+  adminGetUserIbDashboard,
+);
+router.get(
+  "/admin/users/:userId/ib-kyc",
+  brokerAdminAuth,
+  adminListUserIbKyc,
+);
+router.get(
+  "/admin/users/:userId/ib-accounts",
+  brokerAdminAuth,
+  adminListUserIbAccounts,
+);
+router.get(
+  "/admin/users/:userId/ib-requests",
+  brokerAdminAuth,
+  adminListUserIbRequests,
 );
 router.get(
   "/admin/network/summary",
