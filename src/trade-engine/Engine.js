@@ -851,6 +851,14 @@ export class Engine {
               spread_mode: sym.spread_mode,
               contractSize: sym.contractSize,
             },
+          }).then((res) => {
+            if (res && res.skipped && res.reason !== "DEMO_ACCOUNT") {
+              console.warn(
+                "[ENGINE] creditIbOnFill skipped",
+                String(position.positionId),
+                res.reason,
+              );
+            }
           }),
         )
         .catch((err) => {

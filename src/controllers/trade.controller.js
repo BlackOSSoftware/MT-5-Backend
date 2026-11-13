@@ -105,7 +105,7 @@ function detectTradeSource(req) {
 
   const ua = String(req.headers["user-agent"] || "");
   if (
-    /okhttp|dalvik|meta\s?trader|metatrader|oceanapro|oceanaprofx|capacitor/i.test(
+    /okhttp|dalvik|dart\/|flutter|meta\s?trader|metatrader|oceanapro|oceanaprofx|capacitor/i.test(
       ua,
     )
   ) {
