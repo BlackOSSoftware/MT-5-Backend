@@ -38,6 +38,13 @@ class EngineSync {
       commission_per_lot: Number(snapshot.commission_per_lot || 0),
       swap_charge: Number(snapshot.swap_charge || 0),
       spread_enabled: snapshot.spread_enabled === true,
+      account_plan_id:
+        snapshot.account_plan_id != null
+          ? String(snapshot.account_plan_id)
+          : snapshot.accountPlanId != null
+            ? String(snapshot.accountPlanId)
+            : undefined,
+      account_type: snapshot.account_type || snapshot.accountType || undefined,
       bonus_balance: Number(snapshot.bonus_balance || 0),
       bonus_percent_override:
         typeof snapshot.bonus_percent_override === "number"
@@ -317,6 +324,9 @@ class EngineSync {
         swap_charge: Number(acc.swap_charge || 0),
 
         spread_enabled: acc.spread_enabled === true,
+        account_plan_id:
+          acc.account_plan_id != null ? String(acc.account_plan_id) : undefined,
+        account_type: acc.account_type || undefined,
         bonus_balance: Number(acc.bonus_balance || 0),
         bonus_percent_override:
           typeof acc.bonus_percent_override === "number"

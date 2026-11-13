@@ -92,6 +92,10 @@ export async function bootstrapEngine({ accounts, symbols }) {
       // spread control (account-level ON / OFF)
       spread_enabled: Boolean(acc.spread_enabled),
 
+      account_plan_id:
+        acc.account_plan_id != null ? String(acc.account_plan_id) : undefined,
+      account_type: acc.account_type || undefined,
+
       bonus_balance: Number(acc.bonus_balance || 0),
       bonus_percent_override:
         typeof acc.bonus_percent_override === "number"

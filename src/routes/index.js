@@ -8,6 +8,8 @@ import userRoutes from "./v1/user.routes.js";
 import kycRoutes from "./v1/kyc.routes.js";
 import holidayRoutes from "./v1/holiday.routes.js";
 import accountPlanRoutes from "./v1/accountPlan.routes.js";
+import planSymbolSpreadRoutes from "./v1/planSymbolSpread.routes.js";
+import ibSettingsRoutes from "./v1/ibSettings.routes.js";
 import accountRoutes from "./v1/account.routes.js";
 import depositRoutes from "./v1/deposit.routes.js";
 import transactionRoutes from './v1/transaction.routes.js';
@@ -45,6 +47,11 @@ router.use("/v1/auth", authRoutes);
 router.use("/v1/user", userRoutes);
 router.use("/v1/kyc", kycRoutes);
 router.use("/v1/account-plans", accountPlanRoutes);
+router.use(
+  "/v1/account-plans/:planId/symbol-spreads",
+  planSymbolSpreadRoutes,
+);
+router.use("/v1/ib-settings", ibSettingsRoutes);
 router.use("/v1/accounts", accountRoutes);
 router.use("/v1/payment-methods", paymentRoutes);
 router.use("/v1/notification", notificationRoutes);

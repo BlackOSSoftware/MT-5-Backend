@@ -84,6 +84,14 @@ export async function createPlan(data) {
   });
 
   await bustPlanCache(plan.brokerId);
+
+  // Seed plan×symbol spread rows (inactive, $0) — non-blocking
+  import("./planSymbolSpread.service.js")
+    .then((m) =>
+      m.seedPlanSymbolSpreadsSafe(plan._id, plan.brokerId || null),
+    )
+    .catch(() => {});
+
   return plan;
 }
 

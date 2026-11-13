@@ -95,6 +95,8 @@ async function bootstrapTradeEngine() {
       bonus_balance: 1,
       bonus_percent_override: 1,
       brokerId: 1,
+      account_plan_id: 1,
+      account_type: 1,
     },
   ).lean();
 
@@ -120,6 +122,19 @@ async function bootstrapTradeEngine() {
     accounts,
     symbols,
   });
+
+  try {
+    const { warmPlanSpreadMemoryCache } = await import(
+      "./services/planSpreadMemoryCache.js"
+    );
+    const warm = await warmPlanSpreadMemoryCache();
+    console.log(
+      "[PLAN_SPREAD_CACHE] warmed:",
+      warm.enabled ? `${warm.loaded} rows` : "disabled (PLAN_SPREAD_PRICING off)",
+    );
+  } catch (err) {
+    console.warn("[PLAN_SPREAD_CACHE] warm failed:", err?.message || err);
+  }
 
   console.log("[TRADE ENGINE] RAM READY");
 

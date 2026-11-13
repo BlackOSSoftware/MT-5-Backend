@@ -7,6 +7,8 @@ import { Position } from "./Position.js";
 import { RiskManager } from "./RiskManager.js";
 import { engineEvents } from "./EngineEvents.js";
 import { ledgerQueue } from "./LedgerQueue.js";
+import { getCachedPlanSpread } from "../services/planSpreadMemoryCache.js";
+import { isPlanSpreadPricingEnabled } from "../services/spreadResolver.service.js";
 
 // Lazy publish — avoid Engine ↔ EngineSyncBus ↔ bootstrap circular import crash on boot.
 function fanoutPositionClosed(accountId, positionId, balance, bonusBalance) {
@@ -124,6 +126,7 @@ export class Engine {
     status = undefined,
     account_type = undefined,
     brokerId = undefined,
+    account_plan_id = undefined,
     risk_warning_percent = undefined,
     risk_stop_out_percent = undefined,
   }) {
@@ -210,6 +213,16 @@ export class Engine {
 
     // per-account spread ON/OFF
     acc.spread_enabled = Boolean(spread_enabled);
+
+    // optional plan link for PLAN_SPREAD_PRICING (safe if omitted)
+    if (account_plan_id !== undefined) {
+      acc.account_plan_id = account_plan_id
+        ? String(account_plan_id)
+        : null;
+    }
+    if (account_type !== undefined) {
+      acc.account_type = account_type ? String(account_type) : null;
+    }
 
     if (bonus_balance !== undefined) {
       acc.bonus_balance = Number(bonus_balance) || 0;
@@ -379,14 +392,31 @@ export class Engine {
     let outBid = Number(bid);
     let outAsk = Number(ask);
 
+    // Prefer in-memory plan×symbol width when PLAN_SPREAD_PRICING is on.
+    // Never add plan + instrument spreads together. Hot path = Map lookup only.
+    const symCode = String(sym?.code || sym?.symbol || "").toUpperCase();
+    const planCached =
+      isPlanSpreadPricingEnabled() && account?.account_plan_id
+        ? getCachedPlanSpread(account.account_plan_id, symCode)
+        : null;
+    const planSpread =
+      planCached && Number(planCached.clientSpread) > 0
+        ? Number(planCached.clientSpread)
+        : null;
+
+    const instrumentSpread =
+      typeof sym.spread === "number" && sym.spread > 0 ? sym.spread : 0;
+    const effectiveSpread =
+      planSpread != null && planSpread > 0 ? planSpread : instrumentSpread;
+
     // apply spread only when account has it enabled
     if (
       account &&
       account.spread_enabled &&
-      typeof sym.spread === "number" &&
-      sym.spread > 0
+      typeof effectiveSpread === "number" &&
+      effectiveSpread > 0
     ) {
-      const half = sym.spread / 2;
+      const half = effectiveSpread / 2;
       const mode =
         typeof sym.spread_mode === "string"
           ? sym.spread_mode.trim().toUpperCase()
@@ -670,12 +700,17 @@ export class Engine {
     }
 
     // ====== Spread snapshot (for ledger/brokerage) ======
+    const planCachedOpen =
+      isPlanSpreadPricingEnabled() && account?.account_plan_id
+        ? getCachedPlanSpread(account.account_plan_id, symbol)
+        : null;
     const appliedSpread =
-      account &&
-      account.spread_enabled &&
-      typeof sym.spread === "number" &&
-      sym.spread > 0
-        ? sym.spread
+      account && account.spread_enabled
+        ? planCachedOpen && Number(planCachedOpen.clientSpread) > 0
+          ? Number(planCachedOpen.clientSpread)
+          : typeof sym.spread === "number" && sym.spread > 0
+            ? sym.spread
+            : 0
         : 0;
 
     // ====== Commission calculation & immediate deduction ======
@@ -797,6 +832,32 @@ export class Engine {
     } catch (err) {
       console.error("[ENGINE] emit LIVE_ACCOUNT failed", err);
     }
+
+    // IB spread-share credit (async — never block order latency)
+    // Policy: OPEN/FILL only, LIVE accounts, unique ledger, feature-flagged.
+    setImmediate(() => {
+      import("../services/ibCommission.service.js")
+        .then(({ creditIbOnFill }) =>
+          creditIbOnFill({
+            tradeId: String(position.positionId),
+            positionId: String(position.positionId),
+            accountId: String(accountId),
+            symbol,
+            lots: volume,
+            instrument: {
+              spread: sym.spread,
+              spread_mode: sym.spread_mode,
+              contractSize: sym.contractSize,
+            },
+          }),
+        )
+        .catch((err) => {
+          console.error(
+            "[ENGINE] creditIbOnFill failed",
+            err?.message || err,
+          );
+        });
+    });
 
     return position;
   }
