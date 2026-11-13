@@ -4,6 +4,7 @@ import { brokerAdminAuth } from "../../middlewares/brokerAuth.middleware.js";
 import { requireIbDashboardAccess } from "../../utils/ibAccess.js";
 import {
   getMyReferralSummary,
+  getMyReferralChart,
   getMyReferralDashboard,
   listMyReferralRewards,
   listMyDirectReferrals,
@@ -34,6 +35,7 @@ const router = express.Router();
 // User routes
 router.get("/summary", authMiddleware, requireIbDashboardAccess, getMyReferralSummary);
 router.get("/dashboard", authMiddleware, requireIbDashboardAccess, getMyReferralDashboard);
+router.get("/chart", authMiddleware, requireIbDashboardAccess, getMyReferralChart);
 router.get("/rewards", authMiddleware, requireIbDashboardAccess, listMyReferralRewards);
 router.get("/mine", authMiddleware, requireIbDashboardAccess, listMyDirectReferrals);
 router.post("/request", authMiddleware, requireIbDashboardAccess, requestReferralReward);

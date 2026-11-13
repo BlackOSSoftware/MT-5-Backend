@@ -7,6 +7,7 @@ import Withdrawal from "../models/Withdrawal.model.js";
 import Trade from "../models/Trade.model.js";
 import User from "../models/User.model.js";
 import IbRequest from "../models/IbRequest.model.js";
+import IbCommission from "../models/IbCommission.model.js";
 import Kyc from "../models/Kyc.model.js";
 import { generateReferralCode } from "../utils/referralCode.util.js";
 import { syncMissingReferralRewardsForReferrer } from "./referral.service.js";
@@ -973,6 +974,153 @@ export async function listNetworkAccountsService({
     })),
     totalBalance: Number(balanceAgg[0]?.total || 0),
     pagination: paginationOf(safePage, safeLimit, total),
+  };
+}
+
+const COMMISSION_CHART_STATUSES = [
+  "PENDING",
+  "AVAILABLE",
+  "PAID",
+  "CLAWBACK_PENDING",
+];
+
+function dayKeyUTC(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * IB dashboard chart: daily lots + commission for the network,
+ * plus top commission scorers. Default range = last 7 days.
+ */
+export async function getReferralChartService({ userId, from = null, to = null }) {
+  if (!mongoose.isValidObjectId(userId)) throw new Error("Invalid userId");
+  const { scopeIds } = await collectScopeUserIds(userId, "total");
+  const objectIds = scopeIds.map((id) => new mongoose.Types.ObjectId(id));
+
+  const now = new Date();
+  const end = to ? new Date(to) : new Date(now);
+  if (to) end.setHours(23, 59, 59, 999);
+  const start = from
+    ? (() => {
+        const d = new Date(from);
+        d.setHours(0, 0, 0, 0);
+        return d;
+      })()
+    : new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+
+  const dateMatch = { $gte: start, $lte: end };
+  const ibId = new mongoose.Types.ObjectId(userId);
+
+  const [lotAgg, commAgg, scorerAgg] = await Promise.all([
+    objectIds.length
+      ? Trade.aggregate([
+          {
+            $match: {
+              userId: { $in: objectIds },
+              openTime: dateMatch,
+              status: { $in: ["OPEN", "CLOSED", "CLOSING"] },
+            },
+          },
+          {
+            $group: {
+              _id: {
+                $dateToString: { format: "%Y-%m-%d", date: "$openTime" },
+              },
+              lots: { $sum: "$volume" },
+            },
+          },
+        ])
+      : Promise.resolve([]),
+    IbCommission.aggregate([
+      {
+        $match: {
+          ib_user_id: ibId,
+          createdAt: dateMatch,
+          status: { $in: COMMISSION_CHART_STATUSES },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+          },
+          commission: { $sum: "$amount" },
+        },
+      },
+    ]),
+    objectIds.length
+      ? IbCommission.aggregate([
+          {
+            $match: {
+              trader_user_id: { $in: objectIds },
+              createdAt: dateMatch,
+              status: { $in: COMMISSION_CHART_STATUSES },
+            },
+          },
+          {
+            $group: {
+              _id: "$trader_user_id",
+              commission: { $sum: "$amount" },
+            },
+          },
+          { $sort: { commission: -1 } },
+          { $limit: 5 },
+        ])
+      : Promise.resolve([]),
+  ]);
+
+  const lotMap = new Map(
+    (lotAgg || []).map((r) => [String(r._id), Number(r.lots || 0)]),
+  );
+  const commMap = new Map(
+    (commAgg || []).map((r) => [String(r._id), Number(r.commission || 0)]),
+  );
+
+  // Fill every day in range so the x-axis is continuous.
+  const days = [];
+  const cursor = new Date(start);
+  cursor.setUTCHours(0, 0, 0, 0);
+  const last = new Date(end);
+  last.setUTCHours(0, 0, 0, 0);
+  while (cursor <= last) {
+    const key = dayKeyUTC(cursor);
+    days.push({
+      date: key,
+      lots: Number((lotMap.get(key) || 0).toFixed(2)),
+      commission: Number((commMap.get(key) || 0).toFixed(2)),
+    });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  const scorerIds = (scorerAgg || [])
+    .map((r) => (r._id ? String(r._id) : null))
+    .filter(Boolean);
+  const scorerUsers = scorerIds.length
+    ? await User.find({ _id: { $in: scorerIds.map((id) => new mongoose.Types.ObjectId(id)) } })
+        .select("name email ibDashboardEnabled")
+        .lean()
+    : [];
+  const scorerMap = new Map(scorerUsers.map((u) => [String(u._id), u]));
+
+  const topScorers = (scorerAgg || [])
+    .map((r, idx) => {
+      const id = r._id ? String(r._id) : "";
+      const u = scorerMap.get(id);
+      return {
+        rank: idx + 1,
+        userId: id,
+        name: u?.name || "User",
+        email: u?.email || "",
+        userType: u?.ibDashboardEnabled ? "IB" : "Client",
+        commission: Number(Number(r.commission || 0).toFixed(2)),
+      };
+    })
+    .filter((s) => s.commission > 0);
+
+  return {
+    days,
+    topScorers,
+    range: { from: start.toISOString(), to: end.toISOString() },
   };
 }
 

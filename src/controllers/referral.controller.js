@@ -16,6 +16,7 @@ import {
   listNetworkMembersService,
   listNetworkKycService,
   listNetworkAccountsService,
+  getReferralChartService,
 } from "../services/referralDashboard.service.js";
 import {
   createSubIbRequestService,
@@ -36,6 +37,20 @@ import { assertUserBelongsToBroker } from "../utils/brokerScope.js";
 export async function getMyReferralSummary(req, res) {
   try {
     const data = await getReferralSummaryService(req.user._id);
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function getMyReferralChart(req, res) {
+  try {
+    const { from, to } = req.query;
+    const data = await getReferralChartService({
+      userId: req.user._id,
+      from,
+      to,
+    });
     return res.status(200).json({ success: true, data });
   } catch (err) {
     return res.status(400).json({ success: false, message: err.message });
