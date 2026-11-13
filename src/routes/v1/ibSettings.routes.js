@@ -6,8 +6,10 @@ import {
   upsertIbLevelSettingsController,
 } from "../../controllers/ibLevelSettings.controller.js";
 import {
+  getMyIbCommissionSummaryController,
   listIbCommissionsAdminController,
   listMyIbCommissionsController,
+  withdrawMyIbCommissionController,
 } from "../../controllers/ibCommission.controller.js";
 
 const router = express.Router();
@@ -23,7 +25,17 @@ router.get(
   listIbCommissionsAdminController,
 );
 
-/* IB portal — own commission list (spread-share) */
+/* IB portal — own commission summary + list (spread-share) */
+router.get(
+  "/my-commission-summary",
+  authMiddleware,
+  getMyIbCommissionSummaryController,
+);
+router.post(
+  "/my-commissions/withdraw",
+  authMiddleware,
+  withdrawMyIbCommissionController,
+);
 router.get(
   "/my-commissions",
   authMiddleware,

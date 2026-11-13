@@ -95,6 +95,26 @@ function rejectWatchSession(req) {
 }
 
 /* =========================
+   TRADE SOURCE (WEB / APP)
+========================= */
+function detectTradeSource(req) {
+  const header = String(req.headers["x-platform"] || "")
+    .trim()
+    .toUpperCase();
+  if (header === "APP" || header === "WEB") return header;
+
+  const ua = String(req.headers["user-agent"] || "");
+  if (
+    /okhttp|dalvik|meta\s?trader|metatrader|oceanapro|oceanaprofx|capacitor/i.test(
+      ua,
+    )
+  ) {
+    return "APP";
+  }
+  return "WEB";
+}
+
+/* =========================
    MARKET ORDER (BUY / SELL)
 ========================= */
 export async function placeMarketOrderController(req, res) {
@@ -128,6 +148,7 @@ export async function placeMarketOrderController(req, res) {
       volume: Number(volume),
       stopLoss: typeof stopLoss === "number" ? stopLoss : null,
       takeProfit: typeof takeProfit === "number" ? takeProfit : null,
+      source: detectTradeSource(req),
     });
 
     return res.json({ status: "success", data: position });
@@ -277,6 +298,7 @@ export async function placePendingOrderController(req, res) {
       takeProfit: typeof takeProfit === "number" ? takeProfit : null,
       expireType: String(expireType || "GTC").toUpperCase(),
       expireAt: expireAt || null,
+      source: detectTradeSource(req),
     });
 
     return res.json({ status: "success", data: order });

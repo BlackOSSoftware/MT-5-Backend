@@ -104,6 +104,13 @@ const IbCommissionSchema = new mongoose.Schema(
       required: true,
     },
 
+    /** Portion of `amount` already converted to wallet via IB withdrawal */
+    paid_amount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     status: {
       type: String,
       enum: [

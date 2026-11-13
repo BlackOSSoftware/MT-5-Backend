@@ -148,6 +148,7 @@ class LedgerQueue {
     spread,
     commissionCharged,
     swapPerDay,
+    source,
   }) {
     const resolvedUserId =
       userId ||
@@ -171,6 +172,7 @@ class LedgerQueue {
 
       positionId,
       ticket,
+      source: source === "APP" || source === "WEB" ? source : null,
       openDealTicket: await nextDealTicket(),
       symbol,
       side,

@@ -750,9 +750,6 @@ export async function listNetworkMembersService({
   const pageObjectIds = pageIds.map((id) => new mongoose.Types.ObjectId(id));
 
   const [depAgg, wdAgg, lotAgg, commAgg] = await Promise.all([
-    User.find({ _id: { $in: pageObjectIds } })
-      .select("name email createdAt userType ibDashboardEnabled kycStatus")
-      .lean(),
     Deposit.aggregate([
       { $match: { user: { $in: pageObjectIds }, status: "APPROVED" } },
       { $group: { _id: "$user", total: { $sum: "$amount" } } },

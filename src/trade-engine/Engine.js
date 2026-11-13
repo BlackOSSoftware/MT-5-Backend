@@ -635,6 +635,7 @@ export class Engine {
     stopLoss,
     takeProfit,
     overrideOpenPrice = null,
+    source = null,
   }) {
     const account = this.accounts.get(accountId);
     if (!account) throw new Error("Invalid trading account");
@@ -780,6 +781,7 @@ export class Engine {
       spread: appliedSpread,
       commissionCharged: position.commission,
       swapPerDay: position.swapPerDay,
+      source,
       createdAt: Date.now(),
     });
 
@@ -880,6 +882,7 @@ export class Engine {
     takeProfit,
     expireType = "GTC",
     expireAt = null,
+    source = null,
   }) {
     const account = this.accounts.get(accountId);
     const sym = this.symbols.get(symbol);
@@ -936,6 +939,7 @@ export class Engine {
       takeProfit: takeProfit !== undefined ? takeProfit : null,
       expireType,
       expireAt: expireAt ? new Date(expireAt).getTime() : null,
+      source,
       createdAt: Date.now(),
     };
 
@@ -1363,6 +1367,7 @@ export class Engine {
               stopLoss: order.stopLoss,
               takeProfit: order.takeProfit,
               overrideOpenPrice: order.price,
+              source: order.source || null,
             });
 
             // remove pending

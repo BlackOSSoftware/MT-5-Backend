@@ -7,6 +7,7 @@ import app from "./app.js";
 import { connectDB } from "./config/database.js";
 import { startMarketCron } from "./jobs/market.cron.js";
 import { startSwapCron } from "./jobs/swap.cron.js";
+import { startIbCommissionReconcileCron } from "./jobs/ibCommissionReconcile.cron.js";
 import { startPriceWarmJob } from "./jobs/priceWarm.job.js";
 import { attachMarketWS } from "./ws/market.js";
 import { MarketSchedule } from "./models/MarketSchedule.model.js";
@@ -170,6 +171,7 @@ async function start() {
       console.log(`WebSocket Market WS at ws://localhost:${PORT}/ws/market`);
       startMarketCron();
       startSwapCron();
+      startIbCommissionReconcileCron();
       resolve();
     });
   });

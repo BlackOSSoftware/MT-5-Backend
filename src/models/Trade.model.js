@@ -45,6 +45,14 @@ const TradeSchema = new mongoose.Schema(
 
     ticket: { type: Number, unique: true, sparse: true },
 
+    /** Client platform that opened the trade: WEB portal or mobile APP. */
+    source: {
+      type: String,
+      enum: ["WEB", "APP"],
+      default: null,
+      index: true,
+    },
+
     /** Close (out) order ticket - MT5 me close ek alag order hai. */
     closeTicket: { type: Number, unique: true, sparse: true },
 
