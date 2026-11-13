@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken';
 import { randomUUID } from 'node:crypto';
 
 // Short-lived access JWTs; long-lived refresh tokens are rotated separately.
-const ACCESS_TOKEN_TTL = process.env.ACCESS_TOKEN_TTL || '15m';
+const ACCESS_TOKEN_TTL = process.env.ACCESS_TOKEN_TTL || '30d';
 const ACCOUNT_JWT_SECRET = process.env.ACCOUNT_JWT_SECRET;
 const ACCOUNT_JWT_EXPIRE = process.env.ACCOUNT_JWT_EXPIRE || '15m';
 

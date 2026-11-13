@@ -470,6 +470,14 @@ export const adminListClosedTradesService = async (query = {}) => {
               entryPrice: 1,
               closePrice: 1,
 
+              referencePrice: 1,
+              executedPrice: 1,
+              slippageApplied: 1,
+              slippagePoints: 1,
+              slippagePriceDifference: 1,
+              slippageMode: 1,
+              executionType: 1,
+
               stopLoss: 1,
               takeProfit: 1,
 
@@ -662,6 +670,14 @@ export const adminListOpenTradesService = async (query = {}) => {
               openPrice: 1,
               entryPrice: 1,
               closePrice: 1,
+
+              referencePrice: 1,
+              executedPrice: 1,
+              slippageApplied: 1,
+              slippagePoints: 1,
+              slippagePriceDifference: 1,
+              slippageMode: 1,
+              executionType: 1,
 
               stopLoss: 1,
               takeProfit: 1,

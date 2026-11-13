@@ -67,6 +67,9 @@ export class Engine {
     this.bonusEnabled = true;
     this.bonusPercentDefault = 0;
 
+    // Admin-controlled slippage (null = disabled; default keeps legacy behaviour).
+    this.slippageConfig = null;
+
     // In-process market status cache (ultra-fast, no Redis/DB on the order path).
     // Updated by `src/jobs/market.cron.js` and optionally after admin schedule updates.
     this.marketStatusBySegment = new Map(); // key: segment (lowercase) -> { isMarketOpen, reason, ... }
@@ -448,6 +451,96 @@ export class Engine {
   }
 
   /* =========================
+     SLIPPAGE (ADMIN-CONTROLLED)
+     - ADVERSE_ONLY: BUY pays more, SELL receives less.
+     - Points are converted via symbol tickSize (fallback: 10^-pricePrecision).
+     - Slippage is computed ONCE per order here; the result is persisted on the
+       Trade/PendingOrder docs so ledger retries/replays never re-roll it.
+  ========================== */
+
+  setSlippageSettings(cfg = {}) {
+    this.slippageConfig = {
+      enabled: cfg.enabled === true,
+      mode: String(cfg.mode || "FIXED").trim().toUpperCase() === "RANDOM" ? "RANDOM" : "FIXED",
+      fixed_points: Math.max(0, Number(cfg.fixed_points) || 0),
+      min_points: Math.max(0, Number(cfg.min_points) || 0),
+      max_points: Math.max(0, Number(cfg.max_points) || 0),
+      apply_market_orders: cfg.apply_market_orders !== false,
+      apply_stop_orders: cfg.apply_stop_orders !== false,
+      apply_close: cfg.apply_close === true,
+      direction: "ADVERSE_ONLY",
+    };
+  }
+
+  getSlippageConfig() {
+    return this.slippageConfig;
+  }
+
+  /** 1 point = smallest price increment (tickSize, else 10^-precision). */
+  pointSizeForSymbol(sym) {
+    const tick = Number(sym?.tickSize);
+    if (Number.isFinite(tick) && tick > 0) return tick;
+    const prec = Number(sym?.pricePrecision);
+    if (Number.isFinite(prec) && prec >= 0 && prec <= 12) {
+      return Math.pow(10, -prec);
+    }
+    return 0;
+  }
+
+  /** Roll the slippage amount (in points) for this order — called exactly once. */
+  slippagePointsForSymbol(sym) {
+    const cfg = this.slippageConfig;
+    if (!cfg || cfg.enabled !== true) return 0;
+    if (cfg.mode === "RANDOM") {
+      const min = Math.min(cfg.min_points, cfg.max_points);
+      const max = Math.max(cfg.min_points, cfg.max_points);
+      if (max <= 0) return 0;
+      return min + Math.random() * (max - min);
+    }
+    return Math.max(0, Number(cfg.fixed_points) || 0);
+  }
+
+  /**
+   * Apply adverse slippage to a reference execution price.
+   * BUY: ref + offset (rounded up to tick). SELL: ref - offset (rounded down).
+   */
+  applyAdverseSlippage({ sym, side, referencePrice, points }) {
+    const point = this.pointSizeForSymbol(sym);
+    const ref = Number(referencePrice);
+    const pts = Number(points);
+    if (!(point > 0) || !(pts > 0) || !Number.isFinite(ref) || ref <= 0) {
+      return { price: ref, applied: false, points: pts > 0 ? pts : 0, diff: 0 };
+    }
+
+    const offset = pts * point;
+    let price = side === "BUY" ? ref + offset : ref - offset;
+    if (!Number.isFinite(price) || price <= 0) price = ref;
+
+    if (typeof sym?.tickSize === "number" && sym.tickSize > 0) {
+      // Adverse rounding: BUY rounds up (ceil), SELL rounds down (floor).
+      price = this.roundToTick(price, sym.tickSize, side === "SELL");
+    }
+    if (typeof sym?.pricePrecision === "number") {
+      price = Number(price.toFixed(sym.pricePrecision));
+    }
+
+    const diff = Math.abs(price - ref);
+    return { price, applied: diff > 0, points: pts, diff };
+  }
+
+  /** True when slippage may be applied for this execution kind. */
+  shouldApplySlippage(executionKind) {
+    const cfg = this.slippageConfig;
+    if (!cfg || cfg.enabled !== true || cfg.direction !== "ADVERSE_ONLY") {
+      return false;
+    }
+    const kind = String(executionKind || "MARKET").trim().toUpperCase();
+    if (kind === "MARKET") return cfg.apply_market_orders !== false;
+    if (kind === "STOP") return cfg.apply_stop_orders !== false;
+    return false; // LIMIT / STOP_LIMIT keep exact-price protection
+  }
+
+  /* =========================
      RESTORE FROM DB
   ========================== */
 
@@ -635,6 +728,7 @@ export class Engine {
     stopLoss,
     takeProfit,
     overrideOpenPrice = null,
+    executionKind = "MARKET",
     source = null,
   }) {
     const account = this.accounts.get(accountId);
@@ -654,14 +748,55 @@ export class Engine {
       ask: sym.ask,
     });
 
-    // If overrideOpenPrice provided (e.g. for pending fill at its limit), prefer it
-    // Otherwise compute per-account formatted price
+    // If overrideOpenPrice provided (e.g. LIMIT pending fill at its trigger),
+    // prefer it — limit-price protection means NO slippage on LIMIT orders.
+    // Otherwise compute per-account formatted price, then apply admin slippage.
     let openPrice;
+    let referencePrice = null;
+    let slippageApplied = false;
+    let slippagePoints = 0;
+    let slippagePriceDifference = 0;
+    let slippageMode = null;
+
     if (typeof overrideOpenPrice === "number") {
       openPrice = overrideOpenPrice;
+      referencePrice = overrideOpenPrice;
     } else {
       const userPrice = this.formatPrice(account, sym, sym.bid, sym.ask);
-      openPrice = side === "BUY" ? userPrice.ask : userPrice.bid;
+      const refPrice = side === "BUY" ? userPrice.ask : userPrice.bid;
+      referencePrice = refPrice;
+
+      if (this.shouldApplySlippage(executionKind)) {
+        const cfg = this.slippageConfig;
+        const points = this.slippagePointsForSymbol(sym);
+        const slipped = this.applyAdverseSlippage({
+          sym,
+          side,
+          referencePrice: refPrice,
+          points,
+        });
+        openPrice = slipped.price;
+        slippageApplied = slipped.applied;
+        slippagePoints = slipped.points;
+        slippagePriceDifference = slipped.diff;
+        slippageMode = cfg?.mode || null;
+      } else {
+        openPrice = refPrice;
+      }
+
+      // SL/TP must stay valid against the FINAL execution price.
+      if (slippageApplied) {
+        if (stopLoss != null) {
+          const ok =
+            side === "BUY" ? stopLoss < openPrice : stopLoss > openPrice;
+          if (!ok) throw new Error("Invalid stop loss for execution price");
+        }
+        if (takeProfit != null) {
+          const ok =
+            side === "BUY" ? takeProfit > openPrice : takeProfit < openPrice;
+          if (!ok) throw new Error("Invalid take profit for execution price");
+        }
+      }
     }
 
     const leverage = Math.min(account.leverage, sym.maxLeverage);
@@ -683,6 +818,14 @@ export class Engine {
     // attach commission & swap info (computed below)
     position.commission = 0;
     position.swapPerDay = 0;
+
+    // Slippage / execution audit fields (persisted via TRADE_OPEN ledger).
+    position.referencePrice = referencePrice;
+    position.slippageApplied = slippageApplied;
+    position.slippagePoints = slippagePoints;
+    position.slippagePriceDifference = slippagePriceDifference;
+    position.slippageMode = slippageMode;
+    position.executionType = String(executionKind || "MARKET").toUpperCase();
 
     account.positions.set(position.positionId, position);
 
@@ -775,6 +918,12 @@ export class Engine {
       contractSize: sym.contractSize,
       leverage,
       openPrice,
+      referencePrice,
+      slippageApplied,
+      slippagePoints,
+      slippagePriceDifference,
+      slippageMode,
+      executionType: position.executionType,
       stopLoss,
       takeProfit,
       marginUsed: account.usedMargin,
@@ -1366,6 +1515,12 @@ export class Engine {
           /* ===== EXECUTE ===== */
 
           try {
+            // STOP orders fill at the live market quote at trigger time
+            // (reference = formatted ask/bid) + optional adverse slippage.
+            // LIMIT / converted STOP_LIMIT keep exact trigger-price protection.
+            const isStopTriggered =
+              order.orderType === "BUY_STOP" || order.orderType === "SELL_STOP";
+
             const position = this.placeMarketOrder({
               ticket: order.ticket,
               accountId: order.accountId,
@@ -1374,7 +1529,8 @@ export class Engine {
               volume: order.volume,
               stopLoss: order.stopLoss,
               takeProfit: order.takeProfit,
-              overrideOpenPrice: order.price,
+              overrideOpenPrice: isStopTriggered ? null : order.price,
+              executionKind: isStopTriggered ? "STOP" : "LIMIT",
               source: order.source || null,
             });
 
@@ -1385,6 +1541,13 @@ export class Engine {
               ...order,
               executedAt: Date.now(),
               executedPositionId: position.positionId,
+              executedPrice: position.openPrice,
+              referencePrice: position.referencePrice ?? order.price,
+              slippageApplied: position.slippageApplied === true,
+              slippagePoints: position.slippagePoints || 0,
+              slippagePriceDifference: position.slippagePriceDifference || 0,
+              slippageMode: position.slippageMode || null,
+              executionType: position.executionType || null,
             });
 
             try {

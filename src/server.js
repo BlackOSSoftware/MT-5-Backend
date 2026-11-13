@@ -19,6 +19,7 @@ import { startEngineSyncBus } from "./trade-engine/EngineSyncBus.js";
 import Account from "./models/Account.model.js";
 import Instrument from "./models/Instrument.model.js";
 import BonusSetting from "./models/BonusSetting.model.js";
+import SlippageSetting from "./models/SlippageSetting.model.js";
 
 const PORT = Number(process.env.PORT || 4000);
 
@@ -71,6 +72,31 @@ async function bootstrapTradeEngine() {
     }
   } catch (err) {
     console.warn("[BONUS] settings preload failed:", err?.message || err);
+  }
+
+  try {
+    const slippageSetting = await SlippageSetting.findOne({
+      key: "GLOBAL",
+    }).lean();
+    if (slippageSetting && typeof tradeEngine.setSlippageSettings === "function") {
+      tradeEngine.setSlippageSettings({
+        enabled: slippageSetting.enabled === true,
+        mode: slippageSetting.mode,
+        fixed_points: slippageSetting.fixed_points,
+        min_points: slippageSetting.min_points,
+        max_points: slippageSetting.max_points,
+        apply_market_orders: slippageSetting.apply_market_orders,
+        apply_stop_orders: slippageSetting.apply_stop_orders,
+        apply_close: slippageSetting.apply_close,
+        direction: slippageSetting.direction,
+      });
+    }
+    console.log(
+      "[SLIPPAGE] settings loaded:",
+      slippageSetting ? `enabled=${slippageSetting.enabled === true}` : "default(disabled)",
+    );
+  } catch (err) {
+    console.warn("[SLIPPAGE] settings preload failed:", err?.message || err);
   }
 
   try {

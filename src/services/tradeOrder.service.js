@@ -325,6 +325,13 @@ export async function getPositionsService({
       volume: 1,
       openPrice: 1,
       closePrice: 1,
+      referencePrice: 1,
+      executedPrice: 1,
+      slippageApplied: 1,
+      slippagePoints: 1,
+      slippagePriceDifference: 1,
+      slippageMode: 1,
+      executionType: 1,
       contractSize: 1,
       realizedPnL: 1,
       openTime: 1,
@@ -402,6 +409,14 @@ export async function getPositionsService({
 
       openPrice: p.openPrice,
       closePrice: p.closePrice,
+
+      referencePrice: p.referencePrice ?? null,
+      executedPrice: p.executedPrice ?? p.openPrice ?? null,
+      slippageApplied: p.slippageApplied === true,
+      slippagePoints: Number(p.slippagePoints) || 0,
+      slippagePriceDifference: Number(p.slippagePriceDifference) || 0,
+      slippageMode: p.slippageMode || null,
+      executionType: p.executionType || null,
 
       openTime: p.openTime,
       closeTime: p.closeTime,

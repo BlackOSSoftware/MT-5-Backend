@@ -158,6 +158,12 @@ export function startEngineSyncBus() {
           });
         }
       }
+
+      if (type === "SLIPPAGE_SETTINGS") {
+        if (typeof tradeEngine.setSlippageSettings === "function") {
+          tradeEngine.setSlippageSettings(payload || {});
+        }
+      }
     } catch (err) {
       console.warn("[ENGINE_SYNC_BUS] handler error:", err?.message || err);
     }
@@ -261,4 +267,19 @@ export function publishBonusSettings(settings) {
     bonus_enabled: settings.bonus_enabled,
     default_bonus_percent: settings.default_bonus_percent,
   });
+}
+
+export function publishSlippageSettings(settings) {
+  if (!settings) return;
+  try {
+    if (typeof tradeEngine.setSlippageSettings === "function") {
+      tradeEngine.setSlippageSettings(settings);
+    }
+  } catch (err) {
+    console.warn(
+      "[ENGINE_SYNC_BUS] local slippage settings update failed:",
+      err?.message || err,
+    );
+  }
+  publish("SLIPPAGE_SETTINGS", { ...settings });
 }

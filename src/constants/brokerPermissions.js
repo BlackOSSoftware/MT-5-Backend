@@ -14,6 +14,7 @@ export const BROKER_PERMISSIONS = [
   "trading.intervene",
   "settings.bonus",
   "settings.referral",
+  "settings.slippage",
   "admins.manage",
   "reports.export",
   "reports.client_positions",

@@ -142,6 +142,13 @@ class LedgerQueue {
     contractSize,
     leverage,
     openPrice,
+    referencePrice,
+    executedPrice,
+    slippageApplied,
+    slippagePoints,
+    slippagePriceDifference,
+    slippageMode,
+    executionType,
     stopLoss,
     takeProfit,
     marginUsed,
@@ -184,6 +191,33 @@ class LedgerQueue {
       leverage,
       openPrice,
       entryPrice: openPrice,
+      referencePrice:
+        typeof referencePrice === "number" && Number.isFinite(referencePrice)
+          ? referencePrice
+          : null,
+      executedPrice:
+        typeof executedPrice === "number" && Number.isFinite(executedPrice)
+          ? executedPrice
+          : typeof openPrice === "number"
+            ? openPrice
+            : null,
+      slippageApplied: slippageApplied === true,
+      slippagePoints:
+        typeof slippagePoints === "number" && Number.isFinite(slippagePoints)
+          ? slippagePoints
+          : 0,
+      slippagePriceDifference:
+        typeof slippagePriceDifference === "number" &&
+        Number.isFinite(slippagePriceDifference)
+          ? slippagePriceDifference
+          : 0,
+      slippageMode: ["FIXED", "RANDOM"].includes(slippageMode)
+        ? slippageMode
+        : null,
+      executionType:
+        typeof executionType === "string" && executionType.trim()
+          ? executionType.trim().toUpperCase()
+          : "MARKET",
 
       stopLoss: stopLoss ?? null,
       takeProfit: takeProfit ?? null,
@@ -509,6 +543,32 @@ class LedgerQueue {
         $set: {
           status: "EXECUTED",
           executedAt: new Date(),
+          ...(typeof order.executedPrice === "number" &&
+          Number.isFinite(order.executedPrice)
+            ? { executedPrice: order.executedPrice }
+            : {}),
+          ...(typeof order.referencePrice === "number" &&
+          Number.isFinite(order.referencePrice)
+            ? { referencePrice: order.referencePrice }
+            : {}),
+          slippageApplied: order.slippageApplied === true,
+          slippagePoints:
+            typeof order.slippagePoints === "number" &&
+            Number.isFinite(order.slippagePoints)
+              ? order.slippagePoints
+              : 0,
+          slippagePriceDifference:
+            typeof order.slippagePriceDifference === "number" &&
+            Number.isFinite(order.slippagePriceDifference)
+              ? order.slippagePriceDifference
+              : 0,
+          slippageMode: ["FIXED", "RANDOM"].includes(order.slippageMode)
+            ? order.slippageMode
+            : null,
+          executionType:
+            typeof order.executionType === "string" && order.executionType.trim()
+              ? order.executionType.trim().toUpperCase()
+              : null,
         },
       }
     );

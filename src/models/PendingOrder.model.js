@@ -128,6 +128,49 @@ const PendingOrderSchema = new mongoose.Schema(
       index: true,
     },
 
+    /* =========================
+       EXECUTION / SLIPPAGE AUDIT
+    ========================== */
+
+    /** Final executed price (post-slippage) on the created position. */
+    executedPrice: {
+      type: Number,
+      default: null,
+    },
+
+    /** Pre-slippage reference price at trigger time. */
+    referencePrice: {
+      type: Number,
+      default: null,
+    },
+
+    slippageApplied: {
+      type: Boolean,
+      default: false,
+    },
+
+    slippagePoints: {
+      type: Number,
+      default: 0,
+    },
+
+    slippagePriceDifference: {
+      type: Number,
+      default: 0,
+    },
+
+    slippageMode: {
+      type: String,
+      enum: ["FIXED", "RANDOM", null],
+      default: null,
+    },
+
+    /** MARKET | STOP | LIMIT — how the pending order executed. */
+    executionType: {
+      type: String,
+      default: null,
+    },
+
     cancelledAt: {
       type: Date,
       default: null,

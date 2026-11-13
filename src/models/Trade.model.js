@@ -128,6 +128,49 @@ const TradeSchema = new mongoose.Schema(
     },
 
     /* =========================
+       EXECUTION / SLIPPAGE AUDIT
+    ========================== */
+
+    /** Pre-slippage reference price (formatted bid/ask or pending trigger). */
+    referencePrice: {
+      type: Number,
+      default: null,
+    },
+
+    /** Final executed/open price after slippage (same as openPrice). */
+    executedPrice: {
+      type: Number,
+      default: null,
+    },
+
+    slippageApplied: {
+      type: Boolean,
+      default: false,
+    },
+
+    slippagePoints: {
+      type: Number,
+      default: 0,
+    },
+
+    slippagePriceDifference: {
+      type: Number,
+      default: 0,
+    },
+
+    slippageMode: {
+      type: String,
+      enum: ["FIXED", "RANDOM", null],
+      default: null,
+    },
+
+    /** MARKET | STOP | LIMIT — how the position was executed. */
+    executionType: {
+      type: String,
+      default: "MARKET",
+    },
+
+    /* =========================
        STOP LOSS / TAKE PROFIT
     ========================== */
 

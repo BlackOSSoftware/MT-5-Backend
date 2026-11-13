@@ -383,7 +383,7 @@ export async function loginService({
 
         refresh_token_hash: sha256(refreshToken),
         refresh_token_expires_at: new Date(
-          Date.now() + 7 * 24 * 60 * 60 * 1000
+          Date.now() + 30 * 24 * 60 * 60 * 1000
         ),
         refresh_token_ip: ip,
         refresh_token_device: device
@@ -553,7 +553,7 @@ export async function refreshTokenService({ refreshToken, ip, device }) {
       $set: {
         refresh_token_hash: sha256(newRefreshToken),
         refresh_token_expires_at: new Date(
-          Date.now() + 7 * 24 * 60 * 60 * 1000
+          Date.now() + 30 * 24 * 60 * 60 * 1000
         ),
         refresh_token_ip: ip,
         refresh_token_device: device

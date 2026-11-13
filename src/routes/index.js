@@ -36,6 +36,7 @@ import { appUpdateRoutes } from "../modules/app-update/index.js";
 import platformRoutes from "./v1/platform.routes.js";
 import brokersRoutes from "./v1/brokers.routes.js";
 import brokerRiskRoutes from "./v1/brokerRisk.routes.js";
+import slippageRoutes from "./v1/slippage.routes.js";
 const router = Router();
 
 
@@ -43,6 +44,7 @@ router.use("/v1/health", healthRoutes);
 router.use("/v1/platform", platformRoutes);
 router.use("/v1/brokers", brokersRoutes);
 router.use("/v1/risk-settings", brokerRiskRoutes);
+router.use("/v1/slippage-settings", slippageRoutes);
 router.use("/v1/auth", authRoutes);
 router.use("/v1/user", userRoutes);
 router.use("/v1/kyc", kycRoutes);
