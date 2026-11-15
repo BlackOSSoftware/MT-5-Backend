@@ -153,7 +153,11 @@ export const adminListUsersFundsService = async (query = {}) => {
   const match = {};
 
   if (query.brokerId) {
-    match.brokerId = query.brokerId;
+    // Aggregation $match does NOT auto-cast strings to ObjectId —
+    // must convert explicitly or broker-scoped queries return zero rows.
+    match.brokerId = mongoose.isValidObjectId(query.brokerId)
+      ? new mongoose.Types.ObjectId(query.brokerId)
+      : query.brokerId;
   }
 
   if (typeof query.userId === "string" && query.userId.trim()) {
