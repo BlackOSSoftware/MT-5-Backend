@@ -136,7 +136,7 @@ export async function adminApproveDeposit(req, res) {
   try {
     const data = await approveDepositService(
       req.params.id,
-      req.user.id,
+      req.user._id || req.user.id,
       req.brokerId || null,
       req.ip || req.headers?.['x-forwarded-for'] || null,
     );
@@ -157,7 +157,7 @@ export async function adminRejectDeposit(req, res) {
 
     const data = await rejectDepositService(
       req.params.id,
-      req.user.id,
+      req.user._id || req.user.id,
       rejectionReason,
       req.brokerId || null,
       req.ip || req.headers?.['x-forwarded-for'] || null,

@@ -5,6 +5,8 @@ import routes from './routes/index.js';
 import { DOWNLOADS_DIR, DOWNLOADS_ROUTE } from './modules/app-update/index.js';
 
 const app = express();
+// Trust the first proxy hop (nginx/Cloudflare) so req.ip is the real client IP.
+app.set('trust proxy', 1);
 // updated
 app.disable('x-powered-by');
 
