@@ -244,6 +244,7 @@ class LedgerQueue {
     volume,
     openPrice,
     marginUsed,
+    openTime,
   }) {
     const $set = {
       stopLoss: stopLoss ?? null,
@@ -258,6 +259,13 @@ class LedgerQueue {
     }
     if (typeof marginUsed === "number" && Number.isFinite(marginUsed)) {
       $set.marginUsed = marginUsed;
+    }
+    if (openTime !== undefined && openTime !== null) {
+      const ts =
+        openTime instanceof Date ? openTime.getTime() : new Date(openTime).getTime();
+      if (Number.isFinite(ts) && ts > 0) {
+        $set.openTime = new Date(ts);
+      }
     }
 
     await Trade.updateOne({ positionId, status: "OPEN" }, { $set });
@@ -525,6 +533,15 @@ class LedgerQueue {
     };
     if (typeof order.volume === "number" && Number.isFinite(order.volume)) {
       $set.volume = order.volume;
+    }
+    if (order.createdAt !== undefined && order.createdAt !== null) {
+      const ts =
+        order.createdAt instanceof Date
+          ? order.createdAt.getTime()
+          : new Date(order.createdAt).getTime();
+      if (Number.isFinite(ts) && ts > 0) {
+        $set.createdAt = new Date(ts);
+      }
     }
 
     await PendingOrder.updateOne({ orderId: order.orderId }, { $set });

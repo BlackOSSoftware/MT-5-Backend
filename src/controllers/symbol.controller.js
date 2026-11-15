@@ -1,4 +1,8 @@
 import { bulkInsertSymbolsService, getSymbolsService } from '../services/symbol.service.js';
+import {
+  ACTIVITY_ACTIONS,
+  logAdminAction,
+} from '../services/activity.service.js';
 
 export async function getSymbols(req, res) {
   try {
@@ -57,6 +61,15 @@ export async function bulkAddSymbols(req, res) {
     }
 
     const result = await bulkInsertSymbolsService(symbols);
+    logAdminAction({
+      actorId: req.user?._id || req.user?.id || null,
+      action: ACTIVITY_ACTIONS.SYMBOLS_BULK_ADDED,
+      ip: req.ip || req.headers?.['x-forwarded-for'] || null,
+      userAgent: req.headers?.['user-agent'] || null,
+      description: `Bulk added ${symbols.length} symbol(s)`,
+      targetEntityType: 'symbol',
+      metadata: { count: symbols.length },
+    }).catch(() => {});
 
     return res.status(201).json({
       success: true,

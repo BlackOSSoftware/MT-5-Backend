@@ -32,6 +32,22 @@ import {
   assertUserBelongsToBroker,
   withBrokerQuery,
 } from "../utils/brokerScope.js";
+import {
+  ACTIVITY_ACTIONS,
+  ACTOR_TYPES,
+  recordActivity,
+} from "../services/activity.service.js";
+
+function logAdminTradeActivity(req, userId, action) {
+  if (!userId) return;
+  recordActivity({
+    userId,
+    action,
+    actorId: req.user?._id || req.user?.id || null,
+    actorType: ACTOR_TYPES.ADMIN,
+    ip: getRequestIp(req),
+  }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
+}
 
 function normalizeSymbol(symbol) {
   return String(symbol || "").trim().toUpperCase();
@@ -461,6 +477,8 @@ export const adminPlaceMarketOrder = async (req, res) => {
       takeProfit: toOptionalFiniteNumber(takeProfit, "takeProfit"),
     });
 
+    logAdminTradeActivity(req, userId, ACTIVITY_ACTIONS.TRADE_OPENED_BY_ADMIN);
+
     return res.json({ success: true, data: pos });
   } catch (error) {
     return res.status(400).json({
@@ -546,6 +564,8 @@ export const adminPlacePendingOrder = async (req, res) => {
       expireAt,
     });
 
+    logAdminTradeActivity(req, userId, ACTIVITY_ACTIONS.TRADE_MODIFIED_BY_ADMIN);
+
     return res.json({ success: true, data: order });
   } catch (error) {
     return res.status(400).json({
@@ -557,8 +577,16 @@ export const adminPlacePendingOrder = async (req, res) => {
 
 export const adminModifyPendingOrder = async (req, res) => {
   try {
-    const { accountId, userId, orderId, price, volume, stopLoss, takeProfit } =
-      req.body || {};
+    const {
+      accountId,
+      userId,
+      orderId,
+      price,
+      volume,
+      stopLoss,
+      takeProfit,
+      createdAt,
+    } = req.body || {};
 
     if (!accountId || !userId || !orderId) {
       return res.status(400).json({
@@ -574,6 +602,7 @@ export const adminModifyPendingOrder = async (req, res) => {
       volume,
       stopLoss,
       takeProfit,
+      createdAt,
     });
 
     const account = await getAccountForAdminTrade({
@@ -603,7 +632,13 @@ export const adminModifyPendingOrder = async (req, res) => {
         normalized.takeProfit.kind === "omit"
           ? undefined
           : resolveOptionalField(normalized.takeProfit, null),
+      createdAt:
+        normalized.createdAt.kind === "set"
+          ? normalized.createdAt.value
+          : undefined,
     });
+
+    logAdminTradeActivity(req, userId, ACTIVITY_ACTIONS.TRADE_MODIFIED_BY_ADMIN);
 
     return res.json({ success: true, data: updated });
   } catch (error) {
@@ -636,6 +671,7 @@ export const adminCancelPendingOrder = async (req, res) => {
     ensureEngineAccountLoaded(account, ip);
 
     tradeEngine.cancelPendingOrder({ accountId: String(account._id), orderId: String(orderId) });
+    logAdminTradeActivity(req, userId, ACTIVITY_ACTIONS.TRADE_MODIFIED_BY_ADMIN);
 
     return res.json({ success: true });
   } catch (error) {
@@ -656,6 +692,7 @@ export const adminModifyPosition = async (req, res) => {
       openPrice,
       stopLoss,
       takeProfit,
+      openTime,
     } = req.body || {};
 
     if (!accountId || !userId || !positionId) {
@@ -672,6 +709,7 @@ export const adminModifyPosition = async (req, res) => {
       openPrice,
       stopLoss,
       takeProfit,
+      openTime,
     });
 
     const account = await getAccountForAdminTrade({
@@ -703,22 +741,30 @@ export const adminModifyPosition = async (req, res) => {
         normalized.takeProfit.kind === "omit"
           ? undefined
           : resolveOptionalField(normalized.takeProfit, null),
+      openTime:
+        normalized.openTime.kind === "set"
+          ? normalized.openTime.value
+          : undefined,
     });
 
     // Persist immediately so admin list/PnL refetch is not racing LedgerQueue.
+    const persistSet = {
+      volume: result.volume,
+      openPrice: result.openPrice,
+      entryPrice: result.openPrice,
+      stopLoss: result.stopLoss ?? null,
+      takeProfit: result.takeProfit ?? null,
+      grossPnL: Number(result.floatingPnL) || 0,
+    };
+    if (normalized.openTime.kind === "set") {
+      persistSet.openTime = normalized.openTime.value;
+    }
     await Trade.updateOne(
       { positionId: result.positionId, status: "OPEN" },
-      {
-        $set: {
-          volume: result.volume,
-          openPrice: result.openPrice,
-          entryPrice: result.openPrice,
-          stopLoss: result.stopLoss ?? null,
-          takeProfit: result.takeProfit ?? null,
-          grossPnL: Number(result.floatingPnL) || 0,
-        },
-      }
+      { $set: persistSet }
     );
+
+    logAdminTradeActivity(req, userId, ACTIVITY_ACTIONS.TRADE_MODIFIED_BY_ADMIN);
 
     return res.json({ success: true, data: result });
   } catch (error) {
@@ -738,6 +784,7 @@ export const adminModifyClosedTrade = async (req, res) => {
     const actorId = req.user?._id || req.user?.id || null;
     const result = await adminEditClosedTradeService(body, {
       actorId,
+      ip: getRequestIp(req),
     });
     return res.json({ success: true, data: result });
   } catch (error) {
@@ -755,7 +802,10 @@ export const adminDeleteTrade = async (req, res) => {
       await assertUserBelongsToBroker(body.userId, req.brokerId);
     }
     const actorId = req.user?._id || req.user?.id || null;
-    const result = await adminDeleteTradeService(body, { actorId });
+    const result = await adminDeleteTradeService(body, {
+      actorId,
+      ip: getRequestIp(req),
+    });
     return res.json({ success: true, data: result });
   } catch (error) {
     return res.status(400).json({
@@ -772,7 +822,10 @@ export const adminRestoreTrade = async (req, res) => {
       await assertUserBelongsToBroker(body.userId, req.brokerId);
     }
     const actorId = req.user?._id || req.user?.id || null;
-    const result = await adminRestoreTradeService(body, { actorId });
+    const result = await adminRestoreTradeService(body, {
+      actorId,
+      ip: getRequestIp(req),
+    });
     return res.json({ success: true, data: result });
   } catch (error) {
     return res.status(400).json({
@@ -869,6 +922,8 @@ export const adminClosePosition = async (req, res) => {
       closeTicket: await nextOrderTicket(),
       awaitLedger: true,
     });
+
+    logAdminTradeActivity(req, userId, ACTIVITY_ACTIONS.TRADE_CLOSED_BY_ADMIN);
 
     return res.json({ success: true, data: result });
   } catch (error) {

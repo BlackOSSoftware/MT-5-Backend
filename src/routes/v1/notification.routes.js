@@ -13,13 +13,13 @@ import {
   markMyInboxRead,
   markAllMyInboxRead,
 } from '../../controllers/notification.controller.js';
-import { brokerAdminAuth } from '../../middlewares/brokerAuth.middleware.js';
+import { brokerAdminAuth, requireBrokerPermission } from '../../middlewares/brokerAuth.middleware.js';
 import { authMiddleware } from '../../middlewares/auth.middleware.js';
 
 const router = express.Router();
 
-router.post('/admin/broadcast', brokerAdminAuth, adminBroadcastNotification);
-router.post('/admin/send-user', brokerAdminAuth, adminSendUserNotification);
+router.post('/admin/broadcast', brokerAdminAuth, requireBrokerPermission('notifications.send'), adminBroadcastNotification);
+router.post('/admin/send-user', brokerAdminAuth, requireBrokerPermission('notifications.send'), adminSendUserNotification);
 router.get('/admin/list', brokerAdminAuth, adminListNotifications);
 router.get('/admin/inbox', brokerAdminAuth, adminGetInbox);
 router.get('/admin/inbox/count', brokerAdminAuth, adminGetInboxCount);

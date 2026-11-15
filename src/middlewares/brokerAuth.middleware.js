@@ -160,6 +160,21 @@ export function requireBrokerPermission(...needed) {
   };
 }
 
+/** Pass when the admin has ANY of the listed permissions. */
+export function requireBrokerAnyPermission(...allowed) {
+  return (req, res, next) => {
+    if (req.isSuperAdmin || req.permissions?.includes("*")) return next();
+    const ok = allowed.some((p) => req.permissions?.includes(p));
+    if (!ok) {
+      return res.status(403).json({
+        success: false,
+        message: `Missing permission: one of ${allowed.join(", ")}`,
+      });
+    }
+    return next();
+  };
+}
+
 /** Helper: force broker filter on queries */
 export function brokerScopeFilter(req, extra = {}) {
   if (req.brokerId) return { ...extra, brokerId: req.brokerId };

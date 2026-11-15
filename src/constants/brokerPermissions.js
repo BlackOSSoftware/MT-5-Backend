@@ -4,10 +4,14 @@ export const BROKER_PERMISSIONS = [
   "users.create",
   "users.update",
   "kyc.review",
+  "finance.deposit.read",
   "finance.deposit.approve",
   "finance.deposit.reject",
+  "finance.withdrawal.read",
   "finance.withdrawal.approve",
   "finance.withdrawal.reject",
+  "finance.transactions.read",
+  "finance.wallet.adjust",
   "finance.payment_methods.manage",
   "plans.manage",
   "trading.positions.read",
@@ -15,6 +19,12 @@ export const BROKER_PERMISSIONS = [
   "settings.bonus",
   "settings.referral",
   "settings.slippage",
+  "settings.risk",
+  "conversion.manage",
+  "notifications.send",
+  "inquiry.manage",
+  "activity.read",
+  "instruments.manage",
   "admins.manage",
   "reports.export",
   "reports.client_positions",
@@ -30,12 +40,14 @@ export const PLATFORM_ROLES = {
 export const MEMBERSHIP_ROLES = {
   BROKER_ADMIN: "BROKER_ADMIN",
   BROKER_STAFF: "BROKER_STAFF",
+  SUB_ADMIN: "SUB_ADMIN",
 };
 
 export const MEMBERSHIP_STATUS = {
   INVITED: "INVITED",
   ACTIVE: "ACTIVE",
   SUSPENDED: "SUSPENDED",
+  DELETED: "DELETED",
 };
 
 export const BROKER_STATUS = {

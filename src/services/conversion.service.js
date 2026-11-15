@@ -2,7 +2,9 @@ import ConversionRate from "../models/ConversionRate.model.js";
 
 const DEFAULT_RATES = {
   usdtInr: 90,
+  usdtInrWithdraw: 90,
   btcUsdt: 100000,
+  btcUsdtWithdraw: 100000,
 };
 
 function round(value, precision = 8) {
@@ -20,7 +22,13 @@ async function getGlobalSeedRates() {
   if (!global) return { ...DEFAULT_RATES };
   return {
     usdtInr: global.usdtInr ?? DEFAULT_RATES.usdtInr,
+    usdtInrWithdraw:
+      global.usdtInrWithdraw ?? global.usdtInr ?? DEFAULT_RATES.usdtInrWithdraw,
     btcUsdt: global.btcUsdt ?? DEFAULT_RATES.btcUsdt,
+    btcUsdtWithdraw:
+      global.btcUsdtWithdraw ??
+      global.btcUsdt ??
+      DEFAULT_RATES.btcUsdtWithdraw,
   };
 }
 
@@ -57,7 +65,9 @@ export async function getConversionRatesService(brokerId = null) {
 
   return {
     usdtInr: rates.usdtInr,
+    usdtInrWithdraw: rates.usdtInrWithdraw ?? rates.usdtInr,
     btcUsdt: rates.btcUsdt,
+    btcUsdtWithdraw: rates.btcUsdtWithdraw ?? rates.btcUsdt,
     brokerId: rates.brokerId ? String(rates.brokerId) : null,
     updatedAt: rates.updatedAt,
   };
@@ -65,7 +75,9 @@ export async function getConversionRatesService(brokerId = null) {
 
 export async function upsertConversionRatesService({
   usdtInr,
+  usdtInrWithdraw,
   btcUsdt,
+  btcUsdtWithdraw,
   updatedBy,
   brokerId = null,
 }) {
@@ -82,6 +94,17 @@ export async function upsertConversionRatesService({
     setPayload.usdtInr = usdtInr;
   }
 
+  if (usdtInrWithdraw !== undefined) {
+    if (
+      typeof usdtInrWithdraw !== "number" ||
+      Number.isNaN(usdtInrWithdraw) ||
+      usdtInrWithdraw <= 0
+    ) {
+      throw new Error("usdtInrWithdraw must be a number greater than 0");
+    }
+    setPayload.usdtInrWithdraw = usdtInrWithdraw;
+  }
+
   if (btcUsdt !== undefined) {
     if (typeof btcUsdt !== "number" || Number.isNaN(btcUsdt) || btcUsdt <= 0) {
       throw new Error("btcUsdt must be a number greater than 0");
@@ -89,8 +112,21 @@ export async function upsertConversionRatesService({
     setPayload.btcUsdt = btcUsdt;
   }
 
+  if (btcUsdtWithdraw !== undefined) {
+    if (
+      typeof btcUsdtWithdraw !== "number" ||
+      Number.isNaN(btcUsdtWithdraw) ||
+      btcUsdtWithdraw <= 0
+    ) {
+      throw new Error("btcUsdtWithdraw must be a number greater than 0");
+    }
+    setPayload.btcUsdtWithdraw = btcUsdtWithdraw;
+  }
+
   if (!Object.keys(setPayload).length) {
-    throw new Error("At least one rate is required (usdtInr or btcUsdt)");
+    throw new Error(
+      "At least one rate is required (usdtInr, usdtInrWithdraw, btcUsdt or btcUsdtWithdraw)",
+    );
   }
 
   setPayload.updatedBy = updatedBy || null;
@@ -101,7 +137,13 @@ export async function upsertConversionRatesService({
   const setOnInsertPayload = {
     key,
     ...(setPayload.usdtInr === undefined ? { usdtInr: seed.usdtInr } : {}),
+    ...(setPayload.usdtInrWithdraw === undefined
+      ? { usdtInrWithdraw: seed.usdtInrWithdraw }
+      : {}),
     ...(setPayload.btcUsdt === undefined ? { btcUsdt: seed.btcUsdt } : {}),
+    ...(setPayload.btcUsdtWithdraw === undefined
+      ? { btcUsdtWithdraw: seed.btcUsdtWithdraw }
+      : {}),
   };
 
   const rates = await ConversionRate.findOneAndUpdate(
@@ -112,7 +154,9 @@ export async function upsertConversionRatesService({
 
   return {
     usdtInr: rates.usdtInr,
+    usdtInrWithdraw: rates.usdtInrWithdraw ?? rates.usdtInr,
     btcUsdt: rates.btcUsdt,
+    btcUsdtWithdraw: rates.btcUsdtWithdraw ?? rates.btcUsdt,
     brokerId: rates.brokerId ? String(rates.brokerId) : null,
     updatedAt: rates.updatedAt,
   };
@@ -161,8 +205,8 @@ export async function convertAmountService({
 
   let convertedAmount;
   if (to === "USDT") convertedAmount = amountInUsdt;
-  if (to === "INR") convertedAmount = amountInUsdt * rates.usdtInr;
-  if (to === "BTC") convertedAmount = amountInUsdt / rates.btcUsdt;
+  if (to === "INR") convertedAmount = amountInUsdt * rates.usdtInrWithdraw;
+  if (to === "BTC") convertedAmount = amountInUsdt / rates.btcUsdtWithdraw;
 
   return {
     amount,

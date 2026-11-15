@@ -286,14 +286,17 @@ export async function adminListSwapDeductionsService({ query = {} }) {
   const toDateRaw = typeof query.toDate === "string" ? query.toDate.trim() : "";
 
   const todayYmd = getTodayYmd(timeZone);
-  const fromYmd = fromDateRaw || todayYmd;
-  const toYmd = toDateRaw || todayYmd;
+  const hasDateFilter = Boolean(fromDateRaw || toDateRaw);
+  const fromYmd = hasDateFilter ? fromDateRaw || todayYmd : null;
+  const toYmd = hasDateFilter ? toDateRaw || todayYmd : null;
 
-  const { start, end } = getDateRangeForYmd({
-    fromYmd,
-    toYmd,
-    timeZone,
-  });
+  const { start, end } = hasDateFilter
+    ? getDateRangeForYmd({
+        fromYmd,
+        toYmd,
+        timeZone,
+      })
+    : { start: null, end: null };
 
   const statusRaw = typeof query.status === "string" ? query.status.trim() : "";
   const status = statusRaw ? statusRaw.toUpperCase() : "SUCCESS";
@@ -310,8 +313,10 @@ export async function adminListSwapDeductionsService({ query = {} }) {
   const match = {
     type: "SWAP",
     status,
-    createdAt: { $gte: start, $lte: end },
   };
+  if (hasDateFilter) {
+    match.createdAt = { $gte: start, $lte: end };
+  }
 
   if (direction === "charged") {
     match.remark = { $regex: /^Overnight swap charged/i };
@@ -450,8 +455,8 @@ export async function adminListSwapDeductionsService({ query = {} }) {
     summary: {
       totalCount: total,
       totalAmount: Number(row?.summary?.totalAmount) || 0,
-      fromDate: fromYmd,
-      toDate: toYmd,
+      fromDate: hasDateFilter ? fromYmd : "All",
+      toDate: hasDateFilter ? toYmd : "All",
       direction,
       timeZone,
     },

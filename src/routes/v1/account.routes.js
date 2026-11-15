@@ -1,6 +1,6 @@
 import express from "express";
 import { authMiddleware } from "../../middlewares/auth.middleware.js";
-import { brokerAdminAuth } from "../../middlewares/brokerAuth.middleware.js";
+import { brokerAdminAuth, requireBrokerPermission } from "../../middlewares/brokerAuth.middleware.js";
 
 import {
   createAccountController,
@@ -25,9 +25,9 @@ router.get("/single/:id", authMiddleware, getMyAccountDetail);
 router.post("/:id/reset-demo", authMiddleware, resetDemoAccountController);
 router.post("/:id/set-leverage", authMiddleware, setAccountLeverageController);
 router.post("/:id/set-primary", authMiddleware, setPrimaryAccountController);
-router.get("/admin/user/:userId", brokerAdminAuth, adminListUserAccountsController);
-router.get("/admin/search", brokerAdminAuth, adminSearchAccountsController);
-router.patch("/admin/:accountId", brokerAdminAuth, adminUpdateAccountController);
-router.delete("/admin/:accountId", brokerAdminAuth, adminDeleteAccountController);
+router.get("/admin/user/:userId", brokerAdminAuth, requireBrokerPermission("users.read"), adminListUserAccountsController);
+router.get("/admin/search", brokerAdminAuth, requireBrokerPermission("users.read"), adminSearchAccountsController);
+router.patch("/admin/:accountId", brokerAdminAuth, requireBrokerPermission("users.update"), adminUpdateAccountController);
+router.delete("/admin/:accountId", brokerAdminAuth, requireBrokerPermission("users.update"), adminDeleteAccountController);
 
 export default router;

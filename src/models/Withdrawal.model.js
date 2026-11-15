@@ -133,6 +133,21 @@ const WithdrawalSchema = new mongoose.Schema(
         default: "",
         trim: true,
       },
+
+      // CONVERTED PAYOUT (reference for admin payout)
+      converted_amount: {
+        type: Number,
+        default: null,
+      },
+      converted_currency: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      conversion_rate: {
+        type: Number,
+        default: null,
+      },
     },
 
     // STATUS
@@ -152,7 +167,7 @@ const WithdrawalSchema = new mongoose.Schema(
 
     actionBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Admin",
+      ref: "User",
       default: null,
       index: true,
     },

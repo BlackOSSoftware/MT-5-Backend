@@ -138,6 +138,7 @@ export async function adminApproveDeposit(req, res) {
       req.params.id,
       req.user.id,
       req.brokerId || null,
+      req.ip || req.headers?.['x-forwarded-for'] || null,
     );
     return res.json({
       success: true,
@@ -159,6 +160,7 @@ export async function adminRejectDeposit(req, res) {
       req.user.id,
       rejectionReason,
       req.brokerId || null,
+      req.ip || req.headers?.['x-forwarded-for'] || null,
     );
 
     return res.json({
@@ -180,7 +182,8 @@ export async function adminEditDepositAmount(req, res) {
     const result = await editDepositAmountService({
       depositId: id,                  // ✅ service ko sahi value
       newAmount,
-      adminId
+      adminId,
+      ip: req.ip || req.headers?.['x-forwarded-for'] || null,
     });
 
     return res.json({

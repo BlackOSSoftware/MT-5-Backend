@@ -9,6 +9,7 @@ import AccountAuth from '../models/AccountAuth.model.js';
 import User from '../models/User.model.js';
 import BrokerMembership from '../models/BrokerMembership.model.js';
 import { MEMBERSHIP_STATUS } from '../constants/brokerPermissions.js';
+import { sendNotificationMail } from '../utils/mail.util.js';
 
 export const NOTIFICATION_AUDIENCES = ['USERS', 'ADMINS'];
 
@@ -136,6 +137,65 @@ async function pushToTokens(tokens, payload) {
 }
 
 /**
+ * Email a notification to users (fire-and-forget safe).
+ * Sends from the recipient broker's own SMTP so Oceanaprofx users get
+ * mail from the Oceana mailbox, FPTrade users from theirs.
+ */
+async function emailNotificationToUsers({
+  userIds,
+  title,
+  message,
+  brokerId = null,
+}) {
+  try {
+    const ids = (userIds || []).filter((id) => mongoose.isValidObjectId(id));
+    if (!ids.length) return;
+
+    const users = await User.find({
+      _id: { $in: ids },
+      email: { $exists: true, $ne: '' },
+    })
+      .select('email name brokerId')
+      .lean();
+
+    // Group by each user's own broker so mail goes from the right SMTP
+    // (Oceanaprofx users ← Oceana mailbox, FPTrade users ← FPTrade mailbox).
+    const byBroker = new Map();
+    for (const u of users) {
+      const key = String(u.brokerId || brokerId || '');
+      if (!byBroker.has(key)) byBroker.set(key, []);
+      byBroker.get(key).push(u);
+    }
+
+    const CONCURRENCY = 10;
+    for (const [groupBrokerId, groupUsers] of byBroker) {
+      for (let i = 0; i < groupUsers.length; i += CONCURRENCY) {
+        const batch = groupUsers.slice(i, i + CONCURRENCY);
+        await Promise.all(
+          batch.map((u) =>
+            sendNotificationMail({
+              email: u.email,
+              name: u.name,
+              title,
+              message,
+              brokerId: groupBrokerId || brokerId || null,
+            }).catch((err) => {
+              console.error(
+                '[NOTIFICATION_MAIL] send failed',
+                u.email,
+                err?.message || err,
+              );
+            }),
+          ),
+        );
+      }
+    }
+  } catch (err) {
+    console.error('[NOTIFICATION_MAIL] batch failed', err?.message || err);
+  }
+}
+
+/**
  * Broadcast notification (saved for the inbox + pushed to web / Android / iOS).
  * brokerId null = platform-wide (SuperAdmin only); set = only that broker's recipients.
  */
@@ -170,6 +230,14 @@ export async function broadcastNotification({
 
   const userIds = await resolveBroadcastUserIds({ audience, brokerId });
   const tokens = await tokensForUsers(userIds);
+
+  // Email copy for client users (broker-scoped recipients only).
+  if (audience === 'USERS' && userIds.length) {
+    emailNotificationToUsers({ userIds, title, message, brokerId }).catch(
+      () => {},
+    );
+  }
+
   if (!tokens.length) {
     return { saved: true, pushed: false, recipients: userIds.length, reason: 'No active FCM tokens' };
   }
@@ -265,6 +333,14 @@ export async function sendAdminUserNotification({
     message,
     data: data || {},
   });
+
+  // Email copy to the targeted user (their broker's SMTP).
+  emailNotificationToUsers({
+    userIds: [user._id],
+    title,
+    message,
+    brokerId: user.brokerId || brokerId || null,
+  }).catch(() => {});
 
   return {
     notification,

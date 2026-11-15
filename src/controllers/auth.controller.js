@@ -272,7 +272,9 @@ export async function refreshToken(req, res) {
 export async function logout(req, res) {
   try {
     await logoutService({
-      refreshToken: req.body.refreshToken
+      refreshToken: req.body.refreshToken,
+      ip: req.ip,
+      userAgent: req.headers['user-agent'] || null
     });
 
     res.json({

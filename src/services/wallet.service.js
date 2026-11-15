@@ -14,6 +14,11 @@ import { getWithdrawableBalance } from "../utils/nonWithdrawable.util.js";
 import { getUserBrokerId } from "../utils/brokerScope.js";
 import { assertWithdrawMethodEnabled } from "./withdrawMethod.service.js";
 import { validatePayout, buildPayoutSnapshot } from "./withdrawal.service.js";
+import {
+  ACTIVITY_ACTIONS,
+  ACTOR_TYPES,
+  recordActivity,
+} from "./activity.service.js";
 
 /* =====================================================
    HELPERS
@@ -310,6 +315,14 @@ export async function transferWalletService({
       );
     }
 
+    recordActivity({
+      userId,
+      action: ACTIVITY_ACTIONS.TRANSFER_COMPLETED,
+      actorId: userId,
+      actorType: ACTOR_TYPES.SELF,
+      ip: ipAddress || null,
+    }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
+
     return {
       success: true,
       referenceId: refId,
@@ -445,6 +458,14 @@ export async function requestWalletWithdrawalService({
 
     await session.commitTransaction();
     session.endSession();
+
+    recordActivity({
+      userId,
+      action: ACTIVITY_ACTIONS.WITHDRAWAL_REQUESTED,
+      actorId: userId,
+      actorType: ACTOR_TYPES.SELF,
+      ip: ipAddress || null,
+    }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
 
     return {
       success: true,

@@ -5,6 +5,15 @@ import {
   adminCreditTradableFundService,
 } from "../services/bonus.service.js";
 import { assertUserBelongsToBroker } from "../utils/brokerScope.js";
+import {
+  ACTIVITY_ACTIONS,
+  logAdminAction,
+} from "../services/activity.service.js";
+
+const bonusIp = (req) =>
+  req.ip || req.headers?.["x-forwarded-for"] || null;
+
+const bonusActor = (req) => req.user?._id || req.user?.id || null;
 
 export async function adminGetBonusSettings(req, res) {
   try {
@@ -23,6 +32,11 @@ export async function adminUpdateBonusSettings(req, res) {
       default_bonus_percent,
       updatedBy: req.user?._id || null,
     });
+    logAdminAction({
+      actorId: bonusActor(req),
+      action: ACTIVITY_ACTIONS.BONUS_SETTINGS_UPDATED,
+      ip: bonusIp(req),
+    }).catch(() => {});
     return res.status(200).json({
       success: true,
       message: "Bonus settings updated",
@@ -47,6 +61,12 @@ export async function adminCreditBonus(req, res) {
       bonusAmount: Number(bonusAmount),
       reason,
     });
+    logAdminAction({
+      actorId: bonusActor(req),
+      userId,
+      action: ACTIVITY_ACTIONS.BONUS_CREDITED,
+      ip: bonusIp(req),
+    }).catch(() => {});
     return res.status(200).json({
       success: true,
       message: "Bonus added successfully",
@@ -71,6 +91,12 @@ export async function adminCreditTradableFund(req, res) {
       tradableFundAmount: Number(tradableFundAmount),
       reason,
     });
+    logAdminAction({
+      actorId: bonusActor(req),
+      userId,
+      action: ACTIVITY_ACTIONS.TRADABLE_FUND_CREDITED,
+      ip: bonusIp(req),
+    }).catch(() => {});
     return res.status(200).json({
       success: true,
       message: "Tradable fund added successfully",

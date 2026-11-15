@@ -4,10 +4,26 @@ import {
   updateKycStatusService,
   getAdminKycListService
 } from '../services/kyc.service.js';
+import {
+  ACTIVITY_ACTIONS,
+  ACTOR_TYPES,
+  recordActivity,
+} from '../services/activity.service.js';
 /* USER */
 export async function submitKyc(req, res) {
   try {
     const kyc = await submitKycService(req.user._id, req.body);
+    recordActivity({
+      userId: req.user._id,
+      action: ACTIVITY_ACTIONS.KYC_SUBMITTED,
+      actorId: req.user._id,
+      actorType: ACTOR_TYPES.SELF,
+      ip: req.ip || req.headers?.['x-forwarded-for'] || null,
+      userAgent: req.headers?.['user-agent'] || null,
+      description: 'KYC submitted',
+      targetEntityType: 'kyc',
+      targetEntityId: kyc?._id || null,
+    }).catch(() => {});
     res.status(201).json({
       success: true,
       message: 'KYC submitted successfully',
@@ -66,6 +82,10 @@ export async function updateKycStatus(req, res) {
       status,
       rejectionReason,
       req.brokerId || null,
+      {
+        actorId: req.user?._id || req.user?.id || null,
+        ip: req.ip || req.headers?.['x-forwarded-for'] || null,
+      },
     );
 
     res.json({

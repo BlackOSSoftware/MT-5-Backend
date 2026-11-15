@@ -1,8 +1,22 @@
 import { createInstrumentService, deleteInstrumentService, getAllInstrumentService, searchInstrumentService, updateInstrumentService } from '../services/instrument.service.js';
+import {
+  ACTIVITY_ACTIONS,
+  logAdminAction,
+} from '../services/activity.service.js';
+
+const instIp = (req) =>
+  req.ip || req.headers?.['x-forwarded-for'] || null;
+
+const instActor = (req) => req.user?._id || req.user?.id || null;
 
 export const createInstrument = async (req, res) => {
   try {
     const instrument = await createInstrumentService(req.body);
+    logAdminAction({
+      actorId: instActor(req),
+      action: ACTIVITY_ACTIONS.INSTRUMENT_CREATED,
+      ip: instIp(req),
+    }).catch(() => {});
 
     return res.status(201).json({
       success: true,
@@ -84,6 +98,11 @@ export const updateInstrument = async (req, res) => {
     const { id } = req.params;
 
     const instrument = await updateInstrumentService(id, req.body);
+    logAdminAction({
+      actorId: instActor(req),
+      action: ACTIVITY_ACTIONS.INSTRUMENT_UPDATED,
+      ip: instIp(req),
+    }).catch(() => {});
 
     return res.json({
       success: true,
@@ -115,6 +134,11 @@ export const deleteInstrument = async (req, res) => {
     const { id } = req.params;
 
     const instrument = await deleteInstrumentService(id);
+    logAdminAction({
+      actorId: instActor(req),
+      action: ACTIVITY_ACTIONS.INSTRUMENT_DELETED,
+      ip: instIp(req),
+    }).catch(() => {});
 
     return res.json({
       success: true,

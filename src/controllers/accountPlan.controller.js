@@ -5,6 +5,15 @@ import {
   getAllPlansAdmin,
   getActivePlans,
 } from "../services/accountPlan.service.js";
+import {
+  ACTIVITY_ACTIONS,
+  logAdminAction,
+} from "../services/activity.service.js";
+
+const planIp = (req) =>
+  req.ip || req.headers?.["x-forwarded-for"] || null;
+
+const planActor = (req) => req.user?._id || req.user?.id || null;
 
 /* ================= ADMIN ================= */
 
@@ -14,6 +23,11 @@ export const createAccountPlan = async (req, res) => {
       ...req.body,
       ...(req.brokerId ? { brokerId: req.brokerId } : {}),
     });
+    logAdminAction({
+      actorId: planActor(req),
+      action: ACTIVITY_ACTIONS.PLAN_CREATED,
+      ip: planIp(req),
+    }).catch(() => {});
     return res.json({ success: true, data: plan });
   } catch (err) {
     return res.status(400).json({ success: false, message: err.message });
@@ -25,6 +39,11 @@ export const updateAccountPlan = async (req, res) => {
     const plan = await updatePlan(req.params.id, req.body, {
       brokerId: req.brokerId || null,
     });
+    logAdminAction({
+      actorId: planActor(req),
+      action: ACTIVITY_ACTIONS.PLAN_UPDATED,
+      ip: planIp(req),
+    }).catch(() => {});
     return res.json({ success: true, data: plan });
   } catch (err) {
     return res
@@ -36,6 +55,11 @@ export const updateAccountPlan = async (req, res) => {
 export const deleteAccountPlan = async (req, res) => {
   try {
     await deletePlan(req.params.id, { brokerId: req.brokerId || null });
+    logAdminAction({
+      actorId: planActor(req),
+      action: ACTIVITY_ACTIONS.PLAN_DELETED,
+      ip: planIp(req),
+    }).catch(() => {});
     return res.json({ success: true });
   } catch (err) {
     return res

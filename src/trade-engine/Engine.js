@@ -1134,6 +1134,7 @@ export class Engine {
     volume,
     stopLoss,
     takeProfit,
+    createdAt,
   }) {
     const account = this.accounts.get(accountId);
 
@@ -1177,6 +1178,10 @@ export class Engine {
     if (typeof volume === "number") order.volume = volume;
     if (stopLoss !== undefined) order.stopLoss = stopLoss;
     if (takeProfit !== undefined) order.takeProfit = takeProfit;
+    if (createdAt !== undefined) {
+      const ts = createdAt instanceof Date ? createdAt.getTime() : new Date(createdAt).getTime();
+      if (Number.isFinite(ts) && ts > 0) order.createdAt = ts;
+    }
 
     ledgerQueue.enqueue("ORDER_PENDING_MODIFY", order);
 
@@ -1207,6 +1212,7 @@ export class Engine {
     openPrice,
     stopLoss,
     takeProfit,
+    openTime,
   }) {
     const account = this.accounts.get(String(accountId));
 
@@ -1263,6 +1269,10 @@ export class Engine {
     if (typeof openPrice === "number") pos.openPrice = openPrice;
     pos.stopLoss = nextSl ?? null;
     pos.takeProfit = nextTp ?? null;
+    if (openTime !== undefined) {
+      const ts = openTime instanceof Date ? openTime.getTime() : new Date(openTime).getTime();
+      if (Number.isFinite(ts) && ts > 0) pos.openTime = ts;
+    }
 
     // refresh floating PnL + account margin after structural edits
     try {
@@ -1287,6 +1297,7 @@ export class Engine {
       marginUsed: pos.marginUsed ?? account.usedMargin,
       stopLoss: pos.stopLoss,
       takeProfit: pos.takeProfit,
+      openTime: pos.openTime,
       updatedAt: Date.now(),
     });
 
@@ -1313,6 +1324,7 @@ export class Engine {
       openPrice: pos.openPrice,
       stopLoss: pos.stopLoss,
       takeProfit: pos.takeProfit,
+      openTime: pos.openTime,
       floatingPnL: pos.floatingPnL,
     };
   }

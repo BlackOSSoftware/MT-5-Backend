@@ -75,6 +75,10 @@ export async function adminListActivity(req, res) {
     const action = req.query.action || null;
     const userId = req.query.userId || null;
     const actorType = req.query.actorType || null;
+    const category = req.query.category || null;
+    const status = req.query.status || null;
+    const from = req.query.from || null;
+    const to = req.query.to || null;
     const includeUser = true;
 
     const result = await getAllActivityService({
@@ -83,6 +87,10 @@ export async function adminListActivity(req, res) {
       action,
       userId,
       actorType,
+      category,
+      status,
+      from,
+      to,
       includeUser,
       brokerId: req.brokerId || null,
     });

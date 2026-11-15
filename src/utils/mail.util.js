@@ -286,3 +286,45 @@ export async function sendTicketReceivedMail({
     },
   });
 }
+
+/**
+ * Admin broadcast / targeted notification → premium email.
+ * Sent from the recipient broker's own SMTP (Oceana → SMTP_OCEANAPROFX_*).
+ */
+export async function sendNotificationMail({
+  email,
+  name,
+  title,
+  message,
+  brokerCode = null,
+  brokerId = null,
+}) {
+  const code = await resolveBrokerCode({ brokerCode, brokerId });
+  const brand = brandForBrokerCode(code);
+  const frontendUrl = String(brand.frontendUrl || "").replace(/\/$/, "");
+
+  const safeTitle = escapeHtml(title);
+  const safeMessage = escapeHtml(message).replace(/\r?\n/g, "<br />");
+  const notificationLink = `${frontendUrl}/dashboard/notifications`;
+
+  const html = loadTemplate("notification.html", {
+    APP_NAME: brand.appName,
+    USER_NAME: escapeHtml(name || "Trader"),
+    TITLE: safeTitle,
+    MESSAGE: safeMessage,
+    NOTIFICATION_LINK: notificationLink,
+    YEAR: new Date().getFullYear(),
+  });
+
+  return sendMail({
+    to: email,
+    subject: `[${brand.appName}] ${title}`,
+    html,
+    brokerCode: code,
+    headers: {
+      "Auto-Submitted": "auto-generated",
+      "X-Auto-Response-Suppress": "All",
+      Precedence: "bulk",
+    },
+  });
+}

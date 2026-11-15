@@ -1,5 +1,5 @@
 import express from "express";
-import { brokerAdminAuth } from "../../middlewares/brokerAuth.middleware.js";
+import { brokerAdminAuth, requireBrokerPermission } from "../../middlewares/brokerAuth.middleware.js";
 import {
   adminGetBonusSettings,
   adminUpdateBonusSettings,
@@ -10,15 +10,16 @@ import {
 const router = express.Router();
 
 // Admin settings
-router.get("/settings", brokerAdminAuth, adminGetBonusSettings);
-router.put("/settings", brokerAdminAuth, adminUpdateBonusSettings);
+router.get("/settings", brokerAdminAuth, requireBrokerPermission("settings.bonus"), adminGetBonusSettings);
+router.put("/settings", brokerAdminAuth, requireBrokerPermission("settings.bonus"), adminUpdateBonusSettings);
 
 // Admin manual credit
-router.post("/admin/credit", brokerAdminAuth, adminCreditBonus);
-router.post("/admin/add-bonus", brokerAdminAuth, adminCreditBonus);
+router.post("/admin/credit", brokerAdminAuth, requireBrokerPermission("settings.bonus"), adminCreditBonus);
+router.post("/admin/add-bonus", brokerAdminAuth, requireBrokerPermission("settings.bonus"), adminCreditBonus);
 router.post(
   "/admin/add-tradable-fund",
   brokerAdminAuth,
+  requireBrokerPermission("settings.bonus"),
   adminCreditTradableFund,
 );
 

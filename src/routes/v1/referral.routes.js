@@ -1,7 +1,13 @@
 import express from "express";
 import { authMiddleware } from "../../middlewares/auth.middleware.js";
-import { brokerAdminAuth } from "../../middlewares/brokerAuth.middleware.js";
+import { brokerAdminAuth, requireBrokerPermission } from "../../middlewares/brokerAuth.middleware.js";
 import { requireIbDashboardAccess } from "../../utils/ibAccess.js";
+
+// Every /admin/* route in this file requires settings.referral.
+const referralAdminAuth = [
+  brokerAdminAuth,
+  requireBrokerPermission("settings.referral"),
+];
 import {
   getMyReferralSummary,
   getMyReferralChart,
@@ -21,6 +27,8 @@ import {
   adminListUserIbKyc,
   adminListUserIbAccounts,
   adminListUserIbRequests,
+  adminListIbRequests,
+  adminRespondIbRequest,
   getMyReferralTree,
   listMyNetworkDeposits,
   listMyNetworkWithdrawals,
@@ -65,59 +73,69 @@ router.patch(
 // Admin routes — network report (before :rewardId routes)
 router.get(
   "/admin/users/:userId/summary",
-  brokerAdminAuth,
+  ...referralAdminAuth,
   adminGetUserReferralSummary,
 );
 router.get(
   "/admin/users/:userId/ib-dashboard",
-  brokerAdminAuth,
+  ...referralAdminAuth,
   adminGetUserIbDashboard,
 );
 router.get(
   "/admin/users/:userId/ib-kyc",
-  brokerAdminAuth,
+  ...referralAdminAuth,
   adminListUserIbKyc,
 );
 router.get(
   "/admin/users/:userId/ib-accounts",
-  brokerAdminAuth,
+  ...referralAdminAuth,
   adminListUserIbAccounts,
 );
 router.get(
   "/admin/users/:userId/ib-requests",
-  brokerAdminAuth,
+  ...referralAdminAuth,
   adminListUserIbRequests,
 );
 router.get(
+  "/admin/ib-requests",
+  ...referralAdminAuth,
+  adminListIbRequests,
+);
+router.patch(
+  "/admin/ib-requests/:requestId",
+  ...referralAdminAuth,
+  adminRespondIbRequest,
+);
+router.get(
   "/admin/network/summary",
-  brokerAdminAuth,
+  ...referralAdminAuth,
   adminReferralNetworkSummary,
 );
 router.get(
   "/admin/network/links",
-  brokerAdminAuth,
+  ...referralAdminAuth,
   adminListReferralLinks,
 );
 router.get(
   "/admin/network/:userId/tree",
-  brokerAdminAuth,
+  ...referralAdminAuth,
   adminGetReferralTree,
 );
 router.get(
   "/admin/network",
-  brokerAdminAuth,
+  ...referralAdminAuth,
   adminListReferralNetwork,
 );
 
-router.get("/admin/rewards", brokerAdminAuth, adminListReferralRewards);
+router.get("/admin/rewards", ...referralAdminAuth, adminListReferralRewards);
 router.patch(
   "/admin/:rewardId/approve",
-  brokerAdminAuth,
+  ...referralAdminAuth,
   adminApproveReferralReward,
 );
 router.patch(
   "/admin/:rewardId/reject",
-  brokerAdminAuth,
+  ...referralAdminAuth,
   adminRejectReferralReward,
 );
 

@@ -6,6 +6,15 @@ import {
   getActivePaymentMethodsService,
   getAllPaymentMethodsService
 } from '../services/payment.service.js';
+import {
+  ACTIVITY_ACTIONS,
+  logAdminAction,
+} from '../services/activity.service.js';
+
+const pmIp = (req) =>
+  req.ip || req.headers?.['x-forwarded-for'] || null;
+
+const pmActor = (req) => req.user?._id || req.user?.id || null;
 
 /**
  * CREATE (ADMIN)
@@ -24,6 +33,11 @@ export async function createPaymentMethod(req, res) {
       req.body,
       req.brokerId || null,
     );
+    logAdminAction({
+      actorId: pmActor(req),
+      action: ACTIVITY_ACTIONS.PAYMENT_METHOD_CREATED,
+      ip: pmIp(req),
+    }).catch(() => {});
 
     return res.status(201).json({
       success: true,
@@ -64,6 +78,11 @@ export async function updatePaymentMethod(req, res) {
       req.body,
       req.brokerId || null,
     );
+    logAdminAction({
+      actorId: pmActor(req),
+      action: ACTIVITY_ACTIONS.PAYMENT_METHOD_UPDATED,
+      ip: pmIp(req),
+    }).catch(() => {});
 
     return res.json({
       success: true,
@@ -107,6 +126,11 @@ export async function deletePaymentMethod(req, res) {
     }
 
     await deletePaymentMethodService(id, req.brokerId || null);
+    logAdminAction({
+      actorId: pmActor(req),
+      action: ACTIVITY_ACTIONS.PAYMENT_METHOD_DELETED,
+      ip: pmIp(req),
+    }).catch(() => {});
 
     return res.status(200).json({
       success: true,
@@ -162,6 +186,11 @@ export async function togglePaymentMethod(req, res) {
       is_active,
       req.brokerId || null,
     );
+    logAdminAction({
+      actorId: pmActor(req),
+      action: ACTIVITY_ACTIONS.PAYMENT_METHOD_STATUS_CHANGED,
+      ip: pmIp(req),
+    }).catch(() => {});
 
     return res.status(200).json({
       success: true,

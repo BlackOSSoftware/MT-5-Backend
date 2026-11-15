@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { brokerAdminAuth } from "../../middlewares/brokerAuth.middleware.js";
+import { brokerAdminAuth, requireBrokerPermission } from "../../middlewares/brokerAuth.middleware.js";
 import {
   getAdminBrokerRiskSettings,
   upsertAdminBrokerRiskSettings,
@@ -8,7 +8,7 @@ import {
 const router = Router();
 
 /** GET/PUT /api/v1/risk-settings/admin — per-broker stop-out & warning % */
-router.get("/admin", brokerAdminAuth, getAdminBrokerRiskSettings);
-router.put("/admin", brokerAdminAuth, upsertAdminBrokerRiskSettings);
+router.get("/admin", brokerAdminAuth, requireBrokerPermission("settings.risk"), getAdminBrokerRiskSettings);
+router.put("/admin", brokerAdminAuth, requireBrokerPermission("settings.risk"), upsertAdminBrokerRiskSettings);
 
 export default router;

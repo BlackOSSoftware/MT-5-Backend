@@ -18,6 +18,12 @@ import {
 } from "../utils/brokerScope.js";
 import { healNullBrokerUsersToDefaultBroker } from "./user.service.js";
 import { assertWithdrawMethodEnabled } from "./withdrawMethod.service.js";
+import { getConversionRatesService } from "./conversion.service.js";
+import {
+  ACTIVITY_ACTIONS,
+  ACTOR_TYPES,
+  recordActivity,
+} from "./activity.service.js";
 
 /* -------------------- HELPERS -------------------- */
 
@@ -165,6 +171,64 @@ export const buildPayoutSnapshot = (payout = {}) => ({
   note: payout?.note || "",
 });
 
+/**
+ * Compute the payout amount in the method's currency using broker conversion rates.
+ * USD balance -> INR (UPI/Indian bank) uses the WITHDRAW rate.
+ */
+const buildPayoutConversion = ({ amount, method, rates }) => {
+  const code = String(method || "").toUpperCase();
+  const amt = Number(amount);
+  if (!Number.isFinite(amt) || amt <= 0) return {};
+
+  if (code === "UPI" || code === "INDIAN_BANK") {
+    const rate = Number(rates?.usdtInrWithdraw || 0);
+    if (rate > 0) {
+      return {
+        converted_amount: Math.round(amt * rate * 100) / 100,
+        converted_currency: "INR",
+        conversion_rate: rate,
+      };
+    }
+    return {};
+  }
+
+  if (code === "USDT" || code === "CRYPTO") {
+    return {
+      converted_amount: amt,
+      converted_currency: "USDT",
+      conversion_rate: 1,
+    };
+  }
+
+  if (code === "BITCOIN") {
+    const rate = Number(rates?.btcUsdtWithdraw || rates?.btcUsdt || 0);
+    if (rate > 0) {
+      return {
+        converted_amount: Math.round((amt / rate) * 1e8) / 1e8,
+        converted_currency: "BTC",
+        conversion_rate: rate,
+      };
+    }
+    return {};
+  }
+
+  return {
+    converted_amount: amt,
+    converted_currency: "USD",
+    conversion_rate: 1,
+  };
+};
+
+const resolvePayoutConversion = async ({ amount, method, brokerId }) => {
+  if (!brokerId) return {};
+  try {
+    const rates = await getConversionRatesService(brokerId);
+    return buildPayoutConversion({ amount, method, rates });
+  } catch {
+    return {};
+  }
+};
+
 const computeBonusDeduction = ({
   amount,
   bonusBalance,
@@ -231,6 +295,7 @@ export const adminCreateWithdrawal = async ({
     let createdWithdrawal = null;
     let newBalanceAfter = null;
     let newBonusBalanceAfter = null;
+    let createdUserId = null;
 
     await session.withTransaction(async () => {
       /* =========================
@@ -295,6 +360,11 @@ export const adminCreateWithdrawal = async ({
          CREATE WITHDRAWAL
       ========================== */
       const stampBrokerId = await getUserBrokerId(account.user_id);
+      const payoutConversion = await resolvePayoutConversion({
+        amount,
+        method,
+        brokerId: stampBrokerId,
+      });
       const withdrawalDocs = await Withdrawal.create(
         [
           {
@@ -302,7 +372,7 @@ export const adminCreateWithdrawal = async ({
             account: account._id,
             amount,
             method,
-            payout: buildPayoutSnapshot(payout),
+            payout: { ...buildPayoutSnapshot(payout), ...payoutConversion },
             status: "COMPLETED",
             actionBy: adminId,
             actionAt: importDateTime || new Date(),
@@ -319,6 +389,7 @@ export const adminCreateWithdrawal = async ({
       );
 
       createdWithdrawal = withdrawalDocs[0];
+      createdUserId = account.user_id;
 
       /* =========================
          TRANSACTION LOG
@@ -393,6 +464,16 @@ export const adminCreateWithdrawal = async ({
       );
     }
 
+    if (createdUserId) {
+      recordActivity({
+        userId: createdUserId,
+        action: ACTIVITY_ACTIONS.WITHDRAWAL_CREATED_BY_ADMIN,
+        actorId: adminId || null,
+        actorType: ACTOR_TYPES.ADMIN,
+        ip: ipAddress || null,
+      }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
+    }
+
     return {
       ok: true,
       statusCode: 201,
@@ -445,6 +526,11 @@ export const createWithdrawal = async ({ userId, ipAddress, payload }) => {
     }
 
     const stampBrokerIdEarly = await getUserBrokerId(userId);
+    const payoutConversion = await resolvePayoutConversion({
+      amount,
+      method,
+      brokerId: stampBrokerIdEarly,
+    });
     if (stampBrokerIdEarly) {
       const enabledCheck = await assertWithdrawMethodEnabled(
         stampBrokerIdEarly,
@@ -577,7 +663,7 @@ export const createWithdrawal = async ({ userId, ipAddress, payload }) => {
             account: account._id,
             amount,
             method,
-            payout: buildPayoutSnapshot(payout),
+            payout: { ...buildPayoutSnapshot(payout), ...payoutConversion },
             status: "PENDING",
             ipAddress: ipAddress || "",
             bonus_percent: Number(bonusPercent || 0),
@@ -653,6 +739,14 @@ export const createWithdrawal = async ({ userId, ipAddress, payload }) => {
         e && e.message ? e.message : e,
       );
     }
+
+    recordActivity({
+      userId,
+      action: ACTIVITY_ACTIONS.WITHDRAWAL_REQUESTED,
+      actorId: userId,
+      actorType: ACTOR_TYPES.SELF,
+      ip: ipAddress || null,
+    }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
 
     return {
       ok: true,
@@ -1002,8 +1096,10 @@ export const adminApproveWithdrawal = async ({
   adminId,
   withdrawalId,
   brokerId = null,
+  ip = null,
 }) => {
   const session = await mongoose.startSession();
+  let approvedUserId = null;
 
   try {
     if (!mongoose.isValidObjectId(withdrawalId)) {
@@ -1023,6 +1119,7 @@ export const adminApproveWithdrawal = async ({
       if (withdrawal.status !== "PENDING") {
         throw new Error("Only pending withdrawals can be approved");
       }
+      approvedUserId = withdrawal.user;
 
       if (brokerId) {
         const stampedOk =
@@ -1174,6 +1271,16 @@ export const adminApproveWithdrawal = async ({
       );
     });
 
+    if (approvedUserId) {
+      recordActivity({
+        userId: approvedUserId,
+        action: ACTIVITY_ACTIONS.WITHDRAWAL_APPROVED,
+        actorId: adminId || null,
+        actorType: ACTOR_TYPES.ADMIN,
+        ip,
+      }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
+    }
+
     return {
       ok: true,
       statusCode: 200,
@@ -1202,11 +1309,13 @@ export const adminRejectWithdrawal = async ({
   withdrawalId,
   rejectionReason,
   brokerId = null,
+  ip = null,
 }) => {
   const session = await mongoose.startSession();
   let engineAccountId = null;
   let engineNewBalance = null;
   let engineBonusBalance = null;
+  let rejectedUserId = null;
 
   try {
     if (!mongoose.isValidObjectId(withdrawalId)) {
@@ -1231,6 +1340,7 @@ export const adminRejectWithdrawal = async ({
       if (withdrawal.status !== "PENDING") {
         throw new Error("Only pending withdrawals can be rejected");
       }
+      rejectedUserId = withdrawal.user;
 
       if (brokerId) {
         const stampedOk =
@@ -1423,6 +1533,16 @@ export const adminRejectWithdrawal = async ({
         "[ENGINE_SYNC] updateBalance failed (adminRejectWithdrawal)",
         e && e.message ? e.message : e,
       );
+    }
+
+    if (rejectedUserId) {
+      recordActivity({
+        userId: rejectedUserId,
+        action: ACTIVITY_ACTIONS.WITHDRAWAL_REJECTED,
+        actorId: adminId || null,
+        actorType: ACTOR_TYPES.ADMIN,
+        ip,
+      }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
     }
 
     return {

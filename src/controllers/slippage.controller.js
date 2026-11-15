@@ -2,6 +2,10 @@ import {
   getSlippageSettingsService,
   upsertSlippageSettingsService,
 } from "../services/slippage.service.js";
+import {
+  ACTIVITY_ACTIONS,
+  logAdminAction,
+} from "../services/activity.service.js";
 
 export async function adminGetSlippageSettings(req, res) {
   try {
@@ -40,6 +44,14 @@ export async function adminUpdateSlippageSettings(req, res) {
       },
       { updatedBy: req.user?._id || null },
     );
+
+    logAdminAction({
+      actorId: req.user?._id || req.user?.id || null,
+      action: ACTIVITY_ACTIONS.SLIPPAGE_UPDATED,
+      ip: req.ip || req.headers?.["x-forwarded-for"] || null,
+      userAgent: req.headers?.["user-agent"] || null,
+      description: "Slippage settings updated",
+    }).catch(() => {});
 
     return res.status(200).json({
       success: true,

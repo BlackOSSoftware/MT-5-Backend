@@ -22,9 +22,11 @@ import {
   createSubIbRequestService,
   listSubIbRequestsService,
   listUserIbRequestsService,
+  listAllIbRequestsService,
   getMySubIbRequestService,
   getIbRequestStatusService,
   respondSubIbRequestService,
+  respondAdminIbRequestService,
 } from "../services/ibRequest.service.js";
 import {
   adminGetReferralTreeService,
@@ -513,6 +515,41 @@ export async function listSubIbRequests(req, res) {
     return res.status(200).json({ success: true, ...result });
   } catch (err) {
     return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function adminListIbRequests(req, res) {
+  try {
+    const { status, type, q, page = 1, limit = 50 } = req.query;
+    const result = await listAllIbRequestsService({
+      status,
+      type,
+      q,
+      page: Number(page),
+      limit: Number(limit),
+    });
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+export async function adminRespondIbRequest(req, res) {
+  try {
+    const { action, reason } = req.body || {};
+    const data = await respondAdminIbRequestService({
+      requestId: req.params.requestId,
+      action,
+      reason,
+      adminId: req.user?._id || null,
+    });
+    return res.status(200).json({
+      success: true,
+      message: action === "APPROVE" ? "IB request approved" : "IB request rejected",
+      data,
+    });
+  } catch (err) {
+    return res.status(err.status || 400).json({ success: false, message: err.message });
   }
 }
 

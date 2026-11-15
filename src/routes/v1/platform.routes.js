@@ -1,7 +1,9 @@
 import { Router } from "express";
 import {
+  adminHierarchy,
   createAdmin,
   createBroker,
+  deleteMembership,
   grantSuperAdmin,
   inviteBrokerAdmin,
   listAdmins,
@@ -21,8 +23,10 @@ router.get("/permissions", listPermissions);
 
 // SuperAdmin → Admins only (broker/tenant auto under the hood)
 router.get("/admins", listAdmins);
+router.get("/admins/hierarchy", adminHierarchy);
 router.post("/admins", createAdmin);
 router.patch("/memberships/:membershipId", updateMembership);
+router.delete("/memberships/:membershipId", deleteMembership);
 
 // Internal / advanced broker APIs (kept for compatibility)
 router.get("/brokers", listBrokers);

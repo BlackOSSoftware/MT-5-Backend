@@ -6,6 +6,10 @@ import {
   listUserWalletWithdrawalsService,
   adminAdjustWalletService,
 } from "../services/wallet.service.js";
+import {
+  ACTIVITY_ACTIONS,
+  logAdminAction,
+} from "../services/activity.service.js";
 
 function getSafeError(err, fallbackMessage) {
   if (err && typeof err === "object" && err.isPublic) {
@@ -119,6 +123,16 @@ export async function adminAdjustWalletController(req, res) {
       remark,
       ipAddress: req.ip,
     });
+    logAdminAction({
+      actorId: req.user?._id || req.user?.id || null,
+      userId,
+      action: ACTIVITY_ACTIONS.WALLET_ADJUSTED,
+      ip: req.ip,
+      userAgent: req.headers?.["user-agent"] || null,
+      description: `Wallet ${direction} adjustment`,
+      targetEntityType: "wallet",
+      metadata: { amount: Number(amount), direction },
+    }).catch(() => {});
     return res.status(200).json({
       success: true,
       message: "Wallet adjusted successfully",

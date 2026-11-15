@@ -15,7 +15,7 @@ import {
   recordActivity,
 } from "./activity.service.js";
 
-export async function adminEditClosedTradeService(body = {}, { actorId } = {}) {
+export async function adminEditClosedTradeService(body = {}, { actorId, ip } = {}) {
   const { accountId, userId, positionId, tradeId } = body;
 
   if (!accountId || !userId) {
@@ -112,6 +112,7 @@ export async function adminEditClosedTradeService(body = {}, { actorId } = {}) {
     action: ACTIVITY_ACTIONS.TRADE_CLOSED_EDITED_BY_ADMIN,
     actorId: actorId ? String(actorId) : null,
     actorType: ACTOR_TYPES.ADMIN,
+    ip: ip || null,
   });
 
   return {

@@ -2,6 +2,11 @@ import KycModel from '../models/Kyc.model.js';
 import UserModel from '../models/User.model.js';
 import cloudinary from '../config/cloudinary.js';
 import { sendUserNotification } from './notification.service.js';
+import {
+  ACTIVITY_ACTIONS,
+  ACTOR_TYPES,
+  recordActivity,
+} from './activity.service.js';
 /* ===============================
    SUBMIT KYC
 ================================ */
@@ -151,6 +156,7 @@ export async function updateKycStatusService(
   status,
   rejectionReason = '',
   brokerId = null,
+  ctx = {},
 ) {
   if (!['VERIFIED', 'REJECTED'].includes(status)) {
     throw new Error('Invalid KYC status');
@@ -189,6 +195,14 @@ export async function updateKycStatusService(
   await UserModel.findByIdAndUpdate(kyc.user, {
     kycStatus: status
   });
+
+  recordActivity({
+    userId: kyc.user,
+    action: status === 'VERIFIED' ? ACTIVITY_ACTIONS.KYC_APPROVED : ACTIVITY_ACTIONS.KYC_REJECTED,
+    actorId: ctx.actorId || null,
+    actorType: ctx.actorId ? ACTOR_TYPES.ADMIN : ACTOR_TYPES.SYSTEM,
+    ip: ctx.ip || null,
+  }).catch((err) => console.error('ACTIVITY_LOG_ERROR:', err));
 
   /* ===== SEND NOTIFICATION ===== */
   if (status === 'VERIFIED') {

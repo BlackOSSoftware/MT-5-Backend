@@ -68,6 +68,7 @@ export const adminApproveWithdrawalController = async (req, res) => {
     adminId: req.user?._id,
     withdrawalId: req.params.withdrawalId,
     brokerId: req.brokerId || null,
+    ip: req.ip || req.headers?.['x-forwarded-for'] || null,
   });
 
   return res.status(result.statusCode).json({
@@ -85,6 +86,7 @@ export const adminRejectWithdrawalController = async (req, res) => {
     withdrawalId: req.params.withdrawalId,
     rejectionReason,
     brokerId: req.brokerId || null,
+    ip: req.ip || req.headers?.['x-forwarded-for'] || null,
   });
 
   return res.status(result.statusCode).json({

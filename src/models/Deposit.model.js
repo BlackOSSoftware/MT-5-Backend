@@ -72,7 +72,7 @@ const depositSchema = new mongoose.Schema(
 
     actionBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Admin',
+      ref: 'User',
       default: null
     },
 

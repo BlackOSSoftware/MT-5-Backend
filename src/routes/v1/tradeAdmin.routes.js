@@ -27,6 +27,9 @@ import { adminClientPositionReport } from "../../controllers/clientPosition.cont
 // Import middlewares
 import { brokerAdminAuth, requireBrokerPermission } from "../../middlewares/brokerAuth.middleware.js";
 
+const readTrades = requireBrokerPermission("trading.positions.read");
+const interveneTrades = requireBrokerPermission("trading.intervene");
+
 // Create router instance
 const router = Router();
 
@@ -36,15 +39,15 @@ const router = Router();
 
 // Get overall trading summary
 // GET /api/v1/trade-admin/summary
-router.get("/summary", brokerAdminAuth, getTradeAdminSummary);
+router.get("/summary", brokerAdminAuth, readTrades, getTradeAdminSummary);
 
 // Get brokerage earnings
 // GET /api/v1/trade-admin/brokerage
-router.get("/brokerage", brokerAdminAuth, adminListBrokerage);
+router.get("/brokerage", brokerAdminAuth, readTrades, adminListBrokerage);
 
 // Get all users funds
 // GET /api/v1/trade-admin/users/funds
-router.get("/users/funds", brokerAdminAuth, adminListUsersFunds);
+router.get("/users/funds", brokerAdminAuth, readTrades, adminListUsersFunds);
 
 // Scriptwise client position + SL / risk report (permission: reports.client_positions)
 // GET /api/v1/trade-admin/client-positions
@@ -57,35 +60,35 @@ router.get(
 
 // Get all open trades
 // GET /api/v1/trade-admin/trades/open
-router.get("/trades/open", brokerAdminAuth, adminListOpenTrades);
+router.get("/trades/open", brokerAdminAuth, readTrades, adminListOpenTrades);
 
 // Get all closed trades
 // GET /api/v1/trade-admin/trades/closed
-router.get("/trades/closed", brokerAdminAuth, adminListClosedTrades);
+router.get("/trades/closed", brokerAdminAuth, readTrades, adminListClosedTrades);
 
 // Get currently open pending orders
 // GET /api/v1/trade-admin/orders/pending/open
-router.get("/orders/pending/open", brokerAdminAuth, adminListPendingOrdersOpen);
+router.get("/orders/pending/open", brokerAdminAuth, readTrades, adminListPendingOrdersOpen);
 
 // Get pending orders history
 // GET /api/v1/trade-admin/orders/pending/history
-router.get("/orders/pending/history", brokerAdminAuth, adminListPendingOrdersHistory);
+router.get("/orders/pending/history", brokerAdminAuth, readTrades, adminListPendingOrdersHistory);
 
 /* ============================
    BACKWARD COMPATIBLE ROUTES
 ============================ */
 
 // Old route for open trades
-router.get("/trade/open", brokerAdminAuth, adminListOpenTrades);
+router.get("/trade/open", brokerAdminAuth, readTrades, adminListOpenTrades);
 
 // Old route for closed trades
-router.get("/trade/closed", brokerAdminAuth, adminListClosedTrades);
+router.get("/trade/closed", brokerAdminAuth, readTrades, adminListClosedTrades);
 
 // Old route for open pending orders
-router.get("/trade/pending/open", brokerAdminAuth, adminListPendingOrdersOpen);
+router.get("/trade/pending/open", brokerAdminAuth, readTrades, adminListPendingOrdersOpen);
 
 // Old route for pending history
-router.get("/trade/pending/history", brokerAdminAuth, adminListPendingOrdersHistory);
+router.get("/trade/pending/history", brokerAdminAuth, readTrades, adminListPendingOrdersHistory);
 
 /* ============================
    ADMIN: TRADE MANAGEMENT
@@ -93,44 +96,44 @@ router.get("/trade/pending/history", brokerAdminAuth, adminListPendingOrdersHist
 
 // Place market order for user
 // POST /api/v1/trade-admin/trade/market
-router.post("/trade/market", brokerAdminAuth, adminPlaceMarketOrder);
+router.post("/trade/market", brokerAdminAuth, interveneTrades, adminPlaceMarketOrder);
 
 // Place pending order for user
 // POST /api/v1/trade-admin/trade/pending
-router.post("/trade/pending", brokerAdminAuth, adminPlacePendingOrder);
+router.post("/trade/pending", brokerAdminAuth, interveneTrades, adminPlacePendingOrder);
 
 // Modify existing pending order
 // PATCH /api/v1/trade-admin/trade/pending/modify
-router.patch("/trade/pending/modify", brokerAdminAuth, adminModifyPendingOrder);
+router.patch("/trade/pending/modify", brokerAdminAuth, interveneTrades, adminModifyPendingOrder);
 
 // Cancel pending order
 // POST /api/v1/trade-admin/trade/pending/cancel
-router.post("/trade/pending/cancel", brokerAdminAuth, adminCancelPendingOrder);
+router.post("/trade/pending/cancel", brokerAdminAuth, interveneTrades, adminCancelPendingOrder);
 
 // Modify open position
 // PATCH /api/v1/trade-admin/trade/position/modify
-router.patch("/trade/position/modify", brokerAdminAuth, adminModifyPosition);
+router.patch("/trade/position/modify", brokerAdminAuth, interveneTrades, adminModifyPosition);
 
 // Modify closed trade (history overwrite + balance delta)
 // PATCH /api/v1/trade-admin/trade/closed/modify
-router.patch("/trade/closed/modify", brokerAdminAuth, adminModifyClosedTrade);
+router.patch("/trade/closed/modify", brokerAdminAuth, interveneTrades, adminModifyClosedTrade);
 
 // Soft-delete live / pending / closed trade (PnL adjust for closed)
 // POST /api/v1/trade-admin/trade/delete
-router.post("/trade/delete", brokerAdminAuth, adminDeleteTrade);
+router.post("/trade/delete", brokerAdminAuth, interveneTrades, adminDeleteTrade);
 
 // Restore soft-deleted trade
 // POST /api/v1/trade-admin/trade/restore
-router.post("/trade/restore", brokerAdminAuth, adminRestoreTrade);
+router.post("/trade/restore", brokerAdminAuth, interveneTrades, adminRestoreTrade);
 
 // List soft-deleted trades
 // GET /api/v1/trade-admin/trades/deleted
-router.get("/trades/deleted", brokerAdminAuth, adminListDeletedTrades);
+router.get("/trades/deleted", brokerAdminAuth, readTrades, adminListDeletedTrades);
 
 // Close open position
 // POST /api/v1/trade-admin/trade/position/close
-router.post("/trade/position/close", brokerAdminAuth, adminClosePosition);
-router.post("/history/positions/bulk", brokerAdminAuth, adminBulkCreatePositionHistory);
+router.post("/trade/position/close", brokerAdminAuth, interveneTrades, adminClosePosition);
+router.post("/history/positions/bulk", brokerAdminAuth, interveneTrades, adminBulkCreatePositionHistory);
 
 // Export router
 export default router;

@@ -268,10 +268,12 @@ export async function createAdminService({
 /** List all platform admins (excludes SuperAdmin accounts). */
 export async function listAdminsService() {
   const memberships = await BrokerMembership.find({
-    role: MEMBERSHIP_ROLES.BROKER_ADMIN,
+    role: { $in: [MEMBERSHIP_ROLES.BROKER_ADMIN, MEMBERSHIP_ROLES.SUB_ADMIN] },
+    status: { $ne: MEMBERSHIP_STATUS.DELETED },
   })
     .populate("userId", "email name userType platformRole createdAt")
     .populate("brokerId", "code displayName status")
+    .populate("parentAdminId", "email name")
     .sort({ createdAt: -1 })
     .lean();
 
@@ -282,6 +284,10 @@ export async function listAdminsService() {
       status: m.status,
       role: m.role,
       permissions: m.permissions || [],
+      parentAdminId: m.parentAdminId || null,
+      parentAdmin: m.parentAdminId
+        ? { _id: m.parentAdminId._id, email: m.parentAdminId.email, name: m.parentAdminId.name }
+        : null,
       createdAt: m.createdAt,
       user: m.userId
         ? {
@@ -294,6 +300,20 @@ export async function listAdminsService() {
       // kept for internal use; UI should not emphasize broker
       brokerId: m.brokerId?._id || m.brokerId || null,
     }));
+}
+
+/** SuperAdmin deletes any admin/sub-admin membership (soft delete). */
+export async function deleteMembershipService(membershipId) {
+  if (!mongoose.isValidObjectId(membershipId)) {
+    throw new Error("Invalid membershipId");
+  }
+  const updated = await BrokerMembership.findByIdAndUpdate(
+    membershipId,
+    { $set: { status: MEMBERSHIP_STATUS.DELETED } },
+    { new: true },
+  ).lean();
+  if (!updated) throw new Error("Membership not found");
+  return updated;
 }
 
 export { ALL_BROKER_PERMISSIONS, BROKER_PERMISSIONS, PLATFORM_ROLES };

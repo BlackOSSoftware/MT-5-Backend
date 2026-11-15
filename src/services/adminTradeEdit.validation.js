@@ -61,16 +61,18 @@ export function normalizeLivePositionEdit(body = {}) {
   const openPrice = parseOptionalNumber(body.openPrice, "openPrice");
   const stopLoss = parseOptionalNumber(body.stopLoss, "stopLoss");
   const takeProfit = parseOptionalNumber(body.takeProfit, "takeProfit");
+  const openTime = parseOptionalDateTime(body.openTime, "openTime");
 
   const any =
     volume.kind !== "omit" ||
     openPrice.kind !== "omit" ||
     stopLoss.kind !== "omit" ||
-    takeProfit.kind !== "omit";
+    takeProfit.kind !== "omit" ||
+    openTime.kind !== "omit";
 
   if (!any) {
     throw new Error(
-      "At least one of volume, openPrice, stopLoss, takeProfit is required"
+      "At least one of volume, openPrice, stopLoss, takeProfit, openTime is required"
     );
   }
 
@@ -83,8 +85,11 @@ export function normalizeLivePositionEdit(body = {}) {
   if (volume.kind === "clear" || openPrice.kind === "clear") {
     throw new Error("volume and openPrice cannot be cleared");
   }
+  if (openTime.kind === "clear") {
+    throw new Error("openTime cannot be cleared");
+  }
 
-  return { volume, openPrice, stopLoss, takeProfit };
+  return { volume, openPrice, stopLoss, takeProfit, openTime };
 }
 
 export function normalizePendingOrderEdit(body = {}) {
@@ -92,16 +97,18 @@ export function normalizePendingOrderEdit(body = {}) {
   const price = parseOptionalNumber(body.price, "price");
   const stopLoss = parseOptionalNumber(body.stopLoss, "stopLoss");
   const takeProfit = parseOptionalNumber(body.takeProfit, "takeProfit");
+  const createdAt = parseOptionalDateTime(body.createdAt, "createdAt");
 
   const any =
     volume.kind !== "omit" ||
     price.kind !== "omit" ||
     stopLoss.kind !== "omit" ||
-    takeProfit.kind !== "omit";
+    takeProfit.kind !== "omit" ||
+    createdAt.kind !== "omit";
 
   if (!any) {
     throw new Error(
-      "At least one of volume, price, stopLoss, takeProfit is required"
+      "At least one of volume, price, stopLoss, takeProfit, createdAt is required"
     );
   }
 
@@ -114,8 +121,11 @@ export function normalizePendingOrderEdit(body = {}) {
   if (volume.kind === "clear" || price.kind === "clear") {
     throw new Error("volume and price cannot be cleared");
   }
+  if (createdAt.kind === "clear") {
+    throw new Error("createdAt cannot be cleared");
+  }
 
-  return { volume, price, stopLoss, takeProfit };
+  return { volume, price, stopLoss, takeProfit, createdAt };
 }
 
 export const CLOSED_TRADE_CLOSE_REASONS = [

@@ -8,6 +8,11 @@ import Trade from "../models/Trade.model.js";
 import EngineSync from "../trade-engine/EngineSync.js";
 import { publishAccountBalance } from "../trade-engine/EngineSyncBus.js";
 import { getWithdrawableBalance } from "../utils/nonWithdrawable.util.js";
+import {
+  ACTIVITY_ACTIONS,
+  ACTOR_TYPES,
+  recordActivity,
+} from "./activity.service.js";
 
 /* =====================================================
    HELPERS
@@ -331,6 +336,14 @@ export async function createInternalTransferService({
       );
     }
 
+    recordActivity({
+      userId,
+      action: ACTIVITY_ACTIONS.TRANSFER_COMPLETED,
+      actorId: userId,
+      actorType: ACTOR_TYPES.SELF,
+      ip: ipAddress || null,
+    }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
+
     return {
       success: true,
       referenceId: refId,
@@ -551,6 +564,14 @@ export async function adminCreateInternalTransferService({
         error && error.message ? error.message : error
       );
     }
+
+    recordActivity({
+      userId,
+      action: ACTIVITY_ACTIONS.TRANSFER_COMPLETED,
+      actorId: adminId,
+      actorType: ACTOR_TYPES.ADMIN,
+      ip: ipAddress || null,
+    }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
 
     return {
       success: true,

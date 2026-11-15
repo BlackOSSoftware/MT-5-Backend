@@ -365,6 +365,16 @@ export async function loginService({
       { _id: auth._id },
       { $inc: { login_attempts: 1 } }
     ).catch(() => {});
+    recordActivity({
+      userId: user._id,
+      action: ACTIVITY_ACTIONS.LOGIN_FAILED,
+      actorId: user._id,
+      actorType: ACTOR_TYPES.SELF,
+      ip,
+      userAgent: device,
+      status: 'FAILED',
+      description: 'Failed login attempt (invalid password)'
+    }).catch(() => {});
     throw new Error('Invalid credentials');
   }
 
@@ -436,6 +446,16 @@ export async function loginService({
       broker: byId.get(String(r.brokerId)) || null,
     }));
   } catch (_) {}
+
+  recordActivity({
+    userId: user._id,
+    action: ACTIVITY_ACTIONS.LOGIN_SUCCESS,
+    actorId: user._id,
+    actorType: ACTOR_TYPES.SELF,
+    ip,
+    userAgent: device,
+    description: 'User logged in'
+  }).catch(() => {});
 
   return {
     accessToken: signAccessToken(user),
@@ -569,10 +589,14 @@ export async function refreshTokenService({ refreshToken, ip, device }) {
 
 /* ================= LOGOUT ================= */
 
-export async function logoutService({ refreshToken }) {
+export async function logoutService({ refreshToken, ip = null, userAgent = null }) {
   if (!refreshToken) {
     throw new Error('Refresh token required');
   }
+
+  const authDoc = await Auth.findOne({
+    refresh_token_hash: sha256(refreshToken)
+  }).select('user_id').lean();
 
   const result = await Auth.updateOne(
     { refresh_token_hash: sha256(refreshToken) },
@@ -588,6 +612,18 @@ export async function logoutService({ refreshToken }) {
 
   if (result.matchedCount === 0) {
     throw new Error('Invalid refresh token');
+  }
+
+  if (authDoc?.user_id) {
+    recordActivity({
+      userId: authDoc.user_id,
+      action: ACTIVITY_ACTIONS.LOGOUT,
+      actorId: authDoc.user_id,
+      actorType: ACTOR_TYPES.SELF,
+      ip,
+      userAgent,
+      description: 'User logged out'
+    }).catch(() => {});
   }
 }
 

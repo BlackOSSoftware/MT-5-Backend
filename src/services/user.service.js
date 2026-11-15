@@ -21,6 +21,11 @@ import { ibAccessFor } from '../utils/ibAccess.js';
 import BrokerMembership from '../models/BrokerMembership.model.js';
 import Broker from '../models/Broker.model.js';
 import { MEMBERSHIP_STATUS } from '../constants/brokerPermissions.js';
+import {
+  ACTIVITY_ACTIONS,
+  ACTOR_TYPES,
+  recordActivity,
+} from './activity.service.js';
 
 // search users by name or email
 export async function searchUsersService(query = {}) {
@@ -244,7 +249,7 @@ export async function updateMyProfileService(userId, payload = {}) {
   return getMyProfileService(uid);
 }
 
-export async function adminUpdateUserService(userId, payload = {}) {
+export async function adminUpdateUserService(userId, payload = {}, ctx = {}) {
   if (!mongoose.isValidObjectId(userId)) {
     throw new Error('Invalid userId');
   }
@@ -390,6 +395,14 @@ export async function adminUpdateUserService(userId, payload = {}) {
       }
     });
 
+    recordActivity({
+      userId,
+      action: ACTIVITY_ACTIONS.USER_UPDATED_BY_ADMIN,
+      actorId: ctx.actorId || null,
+      actorType: ctx.actorId ? ACTOR_TYPES.ADMIN : ACTOR_TYPES.SYSTEM,
+      ip: ctx.ip || null,
+    }).catch((err) => console.error('ACTIVITY_LOG_ERROR:', err));
+
     return {
       user: updatedUser,
       profile: updatedProfile,
@@ -476,6 +489,9 @@ export async function adminListUsersService(query = {}) {
 
   if (typeof query.userType === "string" && query.userType.trim()) {
     filter.userType = query.userType.trim().toUpperCase();
+  } else {
+    // Admin/sub-admin accounts are managed from Admin Management, not Users.
+    filter.userType = { $ne: "ADMIN" };
   }
 
   if (typeof query.isMailVerified === "string") {
@@ -605,7 +621,7 @@ export async function adminGetUserProfileService(userId) {
   };
 }
 
-export async function adminDeleteUserService(userId) {
+export async function adminDeleteUserService(userId, ctx = {}) {
   if (!mongoose.isValidObjectId(userId)) {
     throw new Error('Invalid userId');
   }
@@ -647,6 +663,15 @@ export async function adminDeleteUserService(userId) {
     WatchlistItem.deleteMany({ userId }),
     User.deleteOne({ _id: userId }),
   ]);
+
+  // Logged AFTER the purge so the entry itself survives.
+  recordActivity({
+    userId,
+    action: ACTIVITY_ACTIONS.USER_DELETED_BY_ADMIN,
+    actorId: ctx.actorId || null,
+    actorType: ctx.actorId ? ACTOR_TYPES.ADMIN : ACTOR_TYPES.SYSTEM,
+    ip: ctx.ip || null,
+  }).catch((err) => console.error('ACTIVITY_LOG_ERROR:', err));
 
   return {
     userId: String(userId),

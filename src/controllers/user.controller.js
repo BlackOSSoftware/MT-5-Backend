@@ -4,6 +4,11 @@ import UserDevice from '../models/UserDevice.model.js';
 import { canToggleIbDashboard } from '../utils/ibAccess.js';
 import { adminDeleteUserService, adminGetUserProfileService, adminListUsersService, adminUpdateUserService, getMyProfileService, updateMyProfileService, searchUsersService, healOrphanUsersCreatedByBrokerAdmin, healNullBrokerUsersToDefaultBroker } from '../services/user.service.js';
 import {
+  ACTIVITY_ACTIONS,
+  ACTOR_TYPES,
+  recordActivity,
+} from '../services/activity.service.js';
+import {
   attachPresenceFields,
   markUserOffline,
   markUserOnline,
@@ -45,6 +50,17 @@ export async function updateMyProfile(req, res) {
         message: 'Failed to update profile'
       });
     }
+
+    recordActivity({
+      userId: req.user._id,
+      action: ACTIVITY_ACTIONS.PROFILE_UPDATED,
+      actorId: req.user._id,
+      actorType: ACTOR_TYPES.SELF,
+      ip: req.ip || req.headers?.['x-forwarded-for'] || null,
+      userAgent: req.headers?.['user-agent'] || null,
+      description: 'User updated their profile',
+      targetEntityType: 'user',
+    }).catch(() => {});
 
     return res.json({
       success: true,
@@ -135,7 +151,10 @@ export async function adminSearchUsers(req, res) {
 export async function adminUpdateUser(req, res) {
   try {
     const { userId } = req.params;
-    const data = await adminUpdateUserService(userId, req.body);
+    const data = await adminUpdateUserService(userId, req.body, {
+      actorId: req.user?._id || req.user?.id || null,
+      ip: req.ip || req.headers?.['x-forwarded-for'] || null,
+    });
 
     return res.json({
       success: true,
@@ -178,6 +197,18 @@ export async function adminSetIbDashboard(req, res) {
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found in your broker' });
     }
+
+    recordActivity({
+      userId,
+      action: ACTIVITY_ACTIONS.IB_DASHBOARD_UPDATED,
+      actorId: req.user?._id || req.user?.id || null,
+      actorType: ACTOR_TYPES.ADMIN,
+      ip: req.ip || req.headers?.['x-forwarded-for'] || null,
+      userAgent: req.headers?.['user-agent'] || null,
+      description: `IB dashboard ${user.ibDashboardEnabled ? 'enabled' : 'disabled'}`,
+      targetEntityType: 'user',
+      metadata: { enabled: user.ibDashboardEnabled },
+    }).catch(() => {});
 
     return res.json({
       success: true,
@@ -262,6 +293,17 @@ export async function adminGetUserProfile(req, res) {
       });
     }
 
+    recordActivity({
+      userId,
+      action: ACTIVITY_ACTIONS.USER_PROFILE_VIEWED,
+      actorId: req.user?._id || req.user?.id || null,
+      actorType: ACTOR_TYPES.ADMIN,
+      ip: req.ip || req.headers?.['x-forwarded-for'] || null,
+      userAgent: req.headers?.['user-agent'] || null,
+      description: 'Admin viewed user profile',
+      targetEntityType: 'user',
+    }).catch(() => {});
+
     return res.json({
       success: true,
       data: attachPresenceFields(data),
@@ -277,7 +319,10 @@ export async function adminGetUserProfile(req, res) {
 export async function adminDeleteUser(req, res) {
   try {
     const { userId } = req.params;
-    const data = await adminDeleteUserService(userId);
+    const data = await adminDeleteUserService(userId, {
+      actorId: req.user?._id || req.user?.id || null,
+      ip: req.ip || req.headers?.['x-forwarded-for'] || null,
+    });
 
     return res.json({
       success: true,

@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Account from "../models/Account.model.js";
 import AccountPlan from "../models/AccountPlan.model.js";
+import Broker from "../models/Broker.model.js";
 import AccountAuth from "../models/AccountAuth.model.js";
 import User from "../models/User.model.js";
 import Trade from "../models/Trade.model.js";
@@ -23,8 +24,17 @@ import { sendAccountCreatedMail } from "../utils/mail.util.js";
 import { generateAccountNumber } from "../utils/accountNumber.util.js";
 import { generateStrongPassword } from "../utils/accountNumber.util.js";
 import { hashPassword } from "../utils/hash.util.js";
+import {
+  ACTIVITY_ACTIONS,
+  ACTOR_TYPES,
+  recordActivity,
+} from "./activity.service.js";
 
 const DEMO_DEFAULT_BALANCE = 10000;
+
+// Oceanaprofx (OCEANAPROFX broker) users: max 3 trading accounts total
+const OCEANAPROFX_BROKER_CODE = "OCEANAPROFX";
+const OCEANAPROFX_MAX_ACCOUNTS = 3;
 
 /* =====================================================
    CREATE ACCOUNT
@@ -47,6 +57,7 @@ export async function createAccount({
   leverage: requestedLeverage,
   trade_password,
   watch_password,
+  ipAddress,
 }) {
   if (!userId) throw new Error("User not authenticated");
 
@@ -80,6 +91,25 @@ export async function createAccount({
   }).lean();
 
   if (!plan) throw new Error("Invalid plan for this broker");
+
+  /* ================= OCEANAPROFX ACCOUNT LIMIT ================= */
+  if (userBrokerId) {
+    const brokerDoc = await Broker.findById(userBrokerId)
+      .select("code")
+      .lean();
+    if (
+      String(brokerDoc?.code || "").toUpperCase() === OCEANAPROFX_BROKER_CODE
+    ) {
+      const totalAccounts = await Account.countDocuments({
+        user_id: userId,
+      });
+      if (totalAccounts >= OCEANAPROFX_MAX_ACCOUNTS) {
+        throw new Error(
+          `Maximum ${OCEANAPROFX_MAX_ACCOUNTS} trading accounts allowed`,
+        );
+      }
+    }
+  }
 
   // Keep live/demo plans isolated:
   // - demo plan (is_demo_allowed=true) can create only demo accounts
@@ -265,6 +295,14 @@ export async function createAccount({
 
   await EngineSync.onAccountCreated(account._id);
   publishAccountSnapshot(account);
+
+  recordActivity({
+    userId,
+    action: ACTIVITY_ACTIONS.ACCOUNT_OPENED,
+    actorId: userId,
+    actorType: ACTOR_TYPES.SELF,
+    ip: ipAddress || null,
+  }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
 
   /* ================= REFERRAL REWARD (LIVE ONLY) ================= */
   // When a referred user opens a live account, create ELIGIBLE reward for referrer

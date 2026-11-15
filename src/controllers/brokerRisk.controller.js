@@ -3,6 +3,10 @@ import {
   getBrokerRiskSettingsService,
   upsertBrokerRiskSettingsService,
 } from "../services/brokerRisk.service.js";
+import {
+  ACTIVITY_ACTIONS,
+  logAdminAction,
+} from "../services/activity.service.js";
 
 export async function getAdminBrokerRiskSettings(req, res) {
   try {
@@ -40,6 +44,11 @@ export async function upsertAdminBrokerRiskSettings(req, res) {
       stop_out_loss_percent,
       updatedBy: req.user?._id || null,
     });
+    logAdminAction({
+      actorId: req.user?._id || req.user?.id || null,
+      action: ACTIVITY_ACTIONS.BROKER_RISK_UPDATED,
+      ip: req.ip || req.headers?.["x-forwarded-for"] || null,
+    }).catch(() => {});
     return res.json({ success: true, data });
   } catch (err) {
     return res.status(400).json({

@@ -16,6 +16,7 @@ function serialize(doc) {
     : null;
   return {
     id: String(doc._id),
+    type: doc.type || "SUB_IB",
     status: doc.status,
     note: doc.note || "",
     rejectionReason: doc.rejectionReason || "",
@@ -31,45 +32,46 @@ function serialize(doc) {
       : { id: String(doc.requester), name: "", email: "", phone: "" },
     ib: ib
       ? { id: String(ib._id), name: ib.name, email: ib.email, phone: ib.phone || "" }
-      : { id: String(doc.ib), name: "", email: "", phone: "" },
+      : null,
     respondedBy: respondedBy
       ? { id: String(respondedBy._id), name: respondedBy.name || "", email: respondedBy.email || "" }
       : null,
   };
 }
 
-/** Client asks their direct referrer to become a Sub-IB. */
+/**
+ * Client asks for IB dashboard access.
+ * - Referred client -> request goes to their direct referrer (type SUB_IB).
+ * - Direct signup (no referrer) -> request goes to admin (type ADMIN).
+ */
 export async function createSubIbRequestService({ userId, note = "" }) {
   if (!mongoose.isValidObjectId(userId)) throw new Error("Invalid userId");
 
   const myReferral = await Referral.findOne({ user_id: userId })
     .select("referred_by")
     .lean();
-  if (!myReferral?.referred_by) {
-    throw new Error("You are not referred by an IB yet");
-  }
-  const ibId = String(myReferral.referred_by);
+  const ibId = myReferral?.referred_by ? String(myReferral.referred_by) : null;
   if (ibId === String(userId)) {
     throw new Error("Invalid referral relationship");
   }
 
-  const existing = await IbRequest.findOne({
-    requester: userId,
-    ib: ibId,
-  }).sort({ createdAt: -1 }).lean();
+  const existing = await IbRequest.findOne({ requester: userId })
+    .sort({ createdAt: -1 })
+    .lean();
   if (existing) {
     if (existing.status === "PENDING") {
-      throw new Error("You already have a pending Sub-IB request");
+      throw new Error("You already have a pending IB request");
     }
     if (existing.status === "APPROVED") {
-      throw new Error("Your Sub-IB request was already approved");
+      throw new Error("Your IB request was already approved");
     }
-    throw new Error("Your Sub-IB request was rejected — you cannot request again");
+    throw new Error("Your IB request was rejected — you cannot request again");
   }
 
   const doc = await IbRequest.create({
     requester: userId,
     ib: ibId,
+    type: ibId ? "SUB_IB" : "ADMIN",
     note: String(note || "").slice(0, 500),
   });
 
@@ -234,6 +236,118 @@ export async function getMySubIbRequestService({ userId }) {
     .populate("ib", USER_SELECT)
     .lean();
   return serialize(doc);
+}
+
+/**
+ * Admin: list ALL IB access requests (SUB_IB + ADMIN types).
+ * Optional filters: status, type, search by requester name/email/phone.
+ */
+export async function listAllIbRequestsService({
+  status = "",
+  type = "",
+  q = "",
+  page = 1,
+  limit = 50,
+}) {
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 50));
+
+  const filter = {};
+  const st = String(status).toUpperCase();
+  if (["PENDING", "APPROVED", "REJECTED"].includes(st)) filter.status = st;
+  const tp = String(type).toUpperCase();
+  if (["SUB_IB", "ADMIN"].includes(tp)) filter.type = tp;
+
+  const search = String(q || "").trim();
+  if (search) {
+    const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    const matchedUsers = await User.find({
+      $or: [{ name: rx }, { email: rx }, { phone: rx }],
+    })
+      .select("_id")
+      .limit(200)
+      .lean();
+    const ids = matchedUsers.map((u) => u._id);
+    filter.requester = { $in: ids.length ? ids : [new mongoose.Types.ObjectId("000000000000000000000000")] };
+  }
+
+  const [items, total, counts] = await Promise.all([
+    IbRequest.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((safePage - 1) * safeLimit)
+      .limit(safeLimit)
+      .populate("requester", USER_SELECT)
+      .populate("ib", USER_SELECT)
+      .populate("respondedBy", "name email")
+      .lean(),
+    IbRequest.countDocuments(filter),
+    IbRequest.aggregate([
+      { $match: filter },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
+  ]);
+
+  const statusCounts = { PENDING: 0, APPROVED: 0, REJECTED: 0 };
+  for (const c of counts) {
+    if (c._id && statusCounts[c._id] !== undefined) statusCounts[c._id] = c.count;
+  }
+
+  return {
+    items: items.map(serialize),
+    statusCounts,
+    pagination: {
+      page: safePage,
+      limit: safeLimit,
+      total,
+      totalPages: total === 0 ? 0 : Math.ceil(total / safeLimit),
+    },
+  };
+}
+
+/**
+ * Admin approves or rejects any IB access request.
+ * Approval grants the requester IB dashboard access.
+ */
+export async function respondAdminIbRequestService({
+  requestId,
+  action,
+  reason = "",
+  adminId = null,
+}) {
+  if (!mongoose.isValidObjectId(requestId)) throw new Error("Invalid request");
+  const act = String(action || "").toUpperCase();
+  if (!["APPROVE", "REJECT"].includes(act)) {
+    throw new Error("Action must be APPROVE or REJECT");
+  }
+
+  const doc = await IbRequest.findById(requestId);
+  if (!doc) {
+    const err = new Error("IB request not found");
+    err.status = 404;
+    throw err;
+  }
+  if (doc.status !== "PENDING") {
+    throw new Error(`Request already ${doc.status.toLowerCase()}`);
+  }
+
+  doc.status = act === "APPROVE" ? "APPROVED" : "REJECTED";
+  doc.respondedBy = adminId || null;
+  doc.respondedAt = new Date();
+  doc.rejectionReason = act === "REJECT" ? String(reason || "").slice(0, 300) : "";
+  await doc.save();
+
+  if (act === "APPROVE") {
+    await User.updateOne(
+      { _id: doc.requester },
+      { $set: { ibDashboardEnabled: true } },
+    );
+  }
+
+  const populated = await IbRequest.findById(doc._id)
+    .populate("requester", USER_SELECT)
+    .populate("ib", USER_SELECT)
+    .lean();
+  return serialize(populated);
 }
 
 /** IB approves or rejects a Sub-IB request. */

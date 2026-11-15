@@ -4,6 +4,11 @@ import Broker from '../models/Broker.model.js';
 import User from '../models/User.model.js';
 import { getUserBrokerId } from '../utils/brokerScope.js';
 import { sendTicketReceivedMail } from '../utils/mail.util.js';
+import {
+  ACTIVITY_ACTIONS,
+  ACTOR_TYPES,
+  recordActivity,
+} from './activity.service.js';
 
 export function formatTicketId(id) {
   if (!id) return null;
@@ -43,6 +48,7 @@ export async function createInquiryService(payload) {
     brokerCode = null,
     brokerId: payloadBrokerId = null,
     userId: payloadUserId = null,
+    ip = null,
     ...inquiryFields
   } = payload || {};
 
@@ -79,6 +85,16 @@ export async function createInquiryService(payload) {
     ...(userId ? { userId } : {}),
     ...(brokerId ? { brokerId } : {}),
   });
+
+  if (userId && mongoose.isValidObjectId(userId)) {
+    recordActivity({
+      userId,
+      action: ACTIVITY_ACTIONS.INQUIRY_SUBMITTED,
+      actorId: userId,
+      actorType: ACTOR_TYPES.SELF,
+      ip: ip || null,
+    }).catch((err) => console.error('ACTIVITY_LOG_ERROR:', err));
+  }
 
   const toEmail = String(inquiry.email || '').trim().toLowerCase();
   if (toEmail) {
@@ -183,6 +199,7 @@ export async function updateInquiryStatusService({
   adminId,
   adminNote = '',
   brokerId = null,
+  ip = null,
 }) {
   if (!mongoose.isValidObjectId(inquiryId)) {
     throw new Error('Invalid inquiry id');
@@ -230,5 +247,18 @@ export async function updateInquiryStatusService({
   }
 
   await inquiry.save();
+
+  if (inquiry.userId && mongoose.isValidObjectId(inquiry.userId)) {
+    recordActivity({
+      userId: inquiry.userId,
+      action: nextStatus === 'REVIEWED'
+        ? ACTIVITY_ACTIONS.INQUIRY_REVIEWED
+        : ACTIVITY_ACTIONS.INQUIRY_CLOSED,
+      actorId: adminId || null,
+      actorType: adminId ? ACTOR_TYPES.ADMIN : ACTOR_TYPES.SYSTEM,
+      ip: ip || null,
+    }).catch((err) => console.error('ACTIVITY_LOG_ERROR:', err));
+  }
+
   return mapInquiry(inquiry);
 }

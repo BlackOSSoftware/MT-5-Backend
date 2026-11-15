@@ -47,6 +47,7 @@ export async function createAccountController(req, res) {
       leverage,
       trade_password: trade_password || master_password,
       watch_password: watch_password || investor_password,
+      ipAddress: req.ip || req.headers?.['x-forwarded-for'] || null,
     });
 
     return res.status(201).json({

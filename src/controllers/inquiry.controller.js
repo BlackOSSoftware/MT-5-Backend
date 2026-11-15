@@ -140,6 +140,7 @@ export async function updateInquiryStatus(req, res) {
       adminNote,
       adminId: req.user?._id,
       brokerId: req.brokerId || null,
+      ip: req.ip || req.headers?.['x-forwarded-for'] || null,
     });
 
     return res.json({

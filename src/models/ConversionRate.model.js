@@ -20,7 +20,21 @@ const conversionRateSchema = new mongoose.Schema(
       min: 0.00000001,
       default: 90,
     },
+    // Separate rate used for withdrawals (USD/USDT -> INR payout preview)
+    usdtInrWithdraw: {
+      type: Number,
+      required: true,
+      min: 0.00000001,
+      default: 90,
+    },
     btcUsdt: {
+      type: Number,
+      required: true,
+      min: 0.00000001,
+      default: 100000,
+    },
+    // Separate rate used for BTC payouts on withdrawal
+    btcUsdtWithdraw: {
       type: Number,
       required: true,
       min: 0.00000001,

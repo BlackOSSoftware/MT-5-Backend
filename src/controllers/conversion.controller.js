@@ -4,6 +4,10 @@ import {
   upsertConversionRatesService,
 } from "../services/conversion.service.js";
 import { getUserBrokerId } from "../utils/brokerScope.js";
+import {
+  ACTIVITY_ACTIONS,
+  logAdminAction,
+} from "../services/activity.service.js";
 
 async function resolveRequestBrokerId(req) {
   if (req.brokerId) return req.brokerId;
@@ -46,15 +50,31 @@ export async function upsertConversionRates(req, res) {
 
     const usdtInr =
       req.body?.usdtInr !== undefined ? Number(req.body.usdtInr) : undefined;
+    const usdtInrWithdraw =
+      req.body?.usdtInrWithdraw !== undefined
+        ? Number(req.body.usdtInrWithdraw)
+        : undefined;
     const btcUsdt =
       req.body?.btcUsdt !== undefined ? Number(req.body.btcUsdt) : undefined;
+    const btcUsdtWithdraw =
+      req.body?.btcUsdtWithdraw !== undefined
+        ? Number(req.body.btcUsdtWithdraw)
+        : undefined;
 
     const data = await upsertConversionRatesService({
       usdtInr,
+      usdtInrWithdraw,
       btcUsdt,
+      btcUsdtWithdraw,
       updatedBy: req.user?._id || null,
       brokerId,
     });
+
+    logAdminAction({
+      actorId: req.user?._id || req.user?.id || null,
+      action: ACTIVITY_ACTIONS.CONVERSION_RATES_UPDATED,
+      ip: req.ip || req.headers?.["x-forwarded-for"] || null,
+    }).catch(() => {});
 
     return res.status(200).json({
       success: true,

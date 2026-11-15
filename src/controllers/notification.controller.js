@@ -12,6 +12,15 @@ import {
   markUserNotificationReadService,
   markAllUserNotificationsReadService,
 } from '../services/notification.service.js';
+import {
+  ACTIVITY_ACTIONS,
+  logAdminAction,
+} from '../services/activity.service.js';
+
+const notifIp = (req) =>
+  req.ip || req.headers?.['x-forwarded-for'] || null;
+
+const notifActor = (req) => req.user?._id || req.user?.id || null;
 
 const adminScope = (req) => ({
   brokerId: req.brokerId || null,
@@ -64,6 +73,16 @@ export async function adminBroadcastNotification(req, res) {
       sentBy: req.user?._id || null,
     });
 
+    logAdminAction({
+      actorId: notifActor(req),
+      action: ACTIVITY_ACTIONS.NOTIFICATION_BROADCAST,
+      ip: notifIp(req),
+      userAgent: req.headers?.['user-agent'] || null,
+      description: `Broadcast notification: ${title}`,
+      targetEntityType: 'notification',
+      metadata: { title, audience },
+    }).catch(() => {});
+
     return res.json({
       success: true,
       message: audience === 'ADMINS' ? 'Notification sent to admins' : 'Notification sent to users',
@@ -104,6 +123,17 @@ export async function adminSendUserNotification(req, res) {
       brokerId: req.brokerId || null,
       sentBy: req.user?._id || null,
     });
+
+    logAdminAction({
+      actorId: notifActor(req),
+      userId: result?.user?._id || userId || null,
+      action: ACTIVITY_ACTIONS.NOTIFICATION_SENT,
+      ip: notifIp(req),
+      userAgent: req.headers?.['user-agent'] || null,
+      description: `Notification sent: ${title}`,
+      targetEntityType: 'notification',
+      metadata: { title, email: result?.user?.email || email || null },
+    }).catch(() => {});
 
     return res.json({
       success: true,

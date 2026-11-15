@@ -32,7 +32,7 @@ async function changeAccountPasswordController(req, res) {
   }
 }
 import { authMiddleware } from "../../middlewares/auth.middleware.js";
-import { brokerAdminAuth } from "../../middlewares/brokerAuth.middleware.js";
+import { brokerAdminAuth, requireBrokerPermission } from "../../middlewares/brokerAuth.middleware.js";
 
 const router = express.Router();
 
@@ -51,7 +51,7 @@ router.post("/:accountId/reset-trade-password",authMiddleware,resetTradePassword
 // watch password reset
 router.post("/:accountId/reset-watch-password",authMiddleware,resetWatchPasswordController);
 // admin reset passwords
-router.post("/admin/:accountId/reset-trade-password", brokerAdminAuth, adminResetTradePasswordController);
-router.post("/admin/:accountId/reset-watch-password", brokerAdminAuth, adminResetWatchPasswordController);
+router.post("/admin/:accountId/reset-trade-password", brokerAdminAuth, requireBrokerPermission("users.update"), adminResetTradePasswordController);
+router.post("/admin/:accountId/reset-watch-password", brokerAdminAuth, requireBrokerPermission("users.update"), adminResetWatchPasswordController);
 
 export default router;

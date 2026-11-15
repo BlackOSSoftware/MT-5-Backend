@@ -3,6 +3,10 @@ import {
   upsertWithdrawMethodSettingsService,
 } from "../services/withdrawMethod.service.js";
 import { getUserBrokerId } from "../utils/brokerScope.js";
+import {
+  ACTIVITY_ACTIONS,
+  logAdminAction,
+} from "../services/activity.service.js";
 
 export async function getAdminWithdrawMethods(req, res) {
   try {
@@ -37,6 +41,12 @@ export async function upsertAdminWithdrawMethods(req, res) {
       methods: req.body?.methods,
       updatedBy: req.user?._id || null,
     });
+
+    logAdminAction({
+      actorId: req.user?._id || req.user?.id || null,
+      action: ACTIVITY_ACTIONS.WITHDRAW_METHODS_UPDATED,
+      ip: req.ip || req.headers?.["x-forwarded-for"] || null,
+    }).catch(() => {});
 
     return res.status(200).json({
       success: true,

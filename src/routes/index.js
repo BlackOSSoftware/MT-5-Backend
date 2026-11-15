@@ -34,6 +34,7 @@ import metaQuotesRoutes from "./v1/metaQuotes.routes.js";
 import { chartRoutes } from "../modules/chart/index.js";
 import { appUpdateRoutes } from "../modules/app-update/index.js";
 import platformRoutes from "./v1/platform.routes.js";
+import brokerStaffRoutes from "./v1/brokerStaff.routes.js";
 import brokersRoutes from "./v1/brokers.routes.js";
 import brokerRiskRoutes from "./v1/brokerRisk.routes.js";
 import slippageRoutes from "./v1/slippage.routes.js";
@@ -42,6 +43,7 @@ const router = Router();
 
 router.use("/v1/health", healthRoutes);
 router.use("/v1/platform", platformRoutes);
+router.use("/v1/broker-staff", brokerStaffRoutes);
 router.use("/v1/brokers", brokersRoutes);
 router.use("/v1/risk-settings", brokerRiskRoutes);
 router.use("/v1/slippage-settings", slippageRoutes);

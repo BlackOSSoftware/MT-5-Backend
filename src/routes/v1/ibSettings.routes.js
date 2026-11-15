@@ -1,5 +1,5 @@
 import express from "express";
-import { brokerAdminAuth } from "../../middlewares/brokerAuth.middleware.js";
+import { brokerAdminAuth, requireBrokerPermission } from "../../middlewares/brokerAuth.middleware.js";
 import { authMiddleware } from "../../middlewares/auth.middleware.js";
 import {
   getIbLevelSettingsController,
@@ -15,13 +15,14 @@ import {
 const router = express.Router();
 
 /* Admin IB level % settings */
-router.get("/levels", brokerAdminAuth, getIbLevelSettingsController);
-router.put("/levels", brokerAdminAuth, upsertIbLevelSettingsController);
+router.get("/levels", brokerAdminAuth, requireBrokerPermission("settings.referral"), getIbLevelSettingsController);
+router.put("/levels", brokerAdminAuth, requireBrokerPermission("settings.referral"), upsertIbLevelSettingsController);
 
 /* Admin IB commission report */
 router.get(
   "/commissions",
   brokerAdminAuth,
+  requireBrokerPermission("settings.referral"),
   listIbCommissionsAdminController,
 );
 

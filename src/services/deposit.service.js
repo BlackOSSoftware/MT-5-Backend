@@ -18,6 +18,11 @@ import {
   assertUserBelongsToBroker,
 } from "../utils/brokerScope.js";
 import { healNullBrokerUsersToDefaultBroker } from "./user.service.js";
+import {
+  ACTIVITY_ACTIONS,
+  ACTOR_TYPES,
+  recordActivity,
+} from "./activity.service.js";
 
 const DEPOSIT_METHODS = new Set([
   "UPI",
@@ -174,6 +179,14 @@ export async function createDepositService({
   } catch {
     /* non-fatal */
   }
+
+  recordActivity({
+    userId,
+    action: ACTIVITY_ACTIONS.DEPOSIT_REQUESTED,
+    actorId: userId,
+    actorType: ACTOR_TYPES.SELF,
+    ip: ipAddress || null,
+  }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
 
   return deposit;
 }
@@ -343,6 +356,10 @@ export async function adminGetAllDepositsService({ page, limit, filters }) {
         path: "account",
         select: "account_number plan_name",
       })
+      .populate({
+        path: "actionBy",
+        select: "name email",
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -502,6 +519,15 @@ export async function adminSearchDepositsService(query = {}) {
       },
     },
     { $unwind: { path: "$account", preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: User.collection.name,
+        localField: "actionBy",
+        foreignField: "_id",
+        as: "actionByUser",
+      },
+    },
+    { $unwind: { path: "$actionByUser", preserveNullAndEmptyArrays: true } },
     ...(qMatch.length > 0 ? [{ $match: { $or: qMatch } }] : []),
     { $sort: { [sortBy]: sortDir, _id: sortDir } },
     {
@@ -534,7 +560,11 @@ export async function adminSearchDepositsService(query = {}) {
               bonus_amount: 1,
               rejectionReason: 1,
               proof: 1,
-              actionBy: 1,
+              actionBy: {
+                _id: "$actionByUser._id",
+                name: "$actionByUser.name",
+                email: "$actionByUser.email",
+              },
               actionAt: 1,
               ipAddress: 1,
               createdAt: 1,
@@ -565,11 +595,12 @@ export async function adminSearchDepositsService(query = {}) {
 /* =========================
    ADMIN APPROVE DEPOSIT
 ========================== */
-export async function approveDepositService(depositId, adminId, brokerId = null) {
+export async function approveDepositService(depositId, adminId, brokerId = null, ip = null) {
   const session = await mongoose.startSession();
   let engineAccountId = null;
   let engineNewBalance = null;
   let engineBonusBalance = null;
+  let approvedUserId = null;
 
   try {
     await session.withTransaction(async () => {
@@ -681,6 +712,7 @@ export async function approveDepositService(depositId, adminId, brokerId = null)
       engineAccountId = String(account._id);
       engineNewBalance = Number(newBalance);
       engineBonusBalance = currentBonusBalance;
+      approvedUserId = deposit.user;
     });
 
     /* =========================
@@ -704,6 +736,16 @@ export async function approveDepositService(depositId, adminId, brokerId = null)
       );
     }
 
+    if (approvedUserId) {
+      recordActivity({
+        userId: approvedUserId,
+        action: ACTIVITY_ACTIONS.DEPOSIT_APPROVED,
+        actorId: adminId || null,
+        actorType: ACTOR_TYPES.ADMIN,
+        ip,
+      }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
+    }
+
     return {
       success: true,
       depositId,
@@ -721,6 +763,7 @@ export async function rejectDepositService(
   adminId,
   reason,
   brokerId = null,
+  ip = null,
 ) {
   if (!reason) throw new Error("Rejection reason required");
 
@@ -745,6 +788,15 @@ export async function rejectDepositService(
   deposit.actionAt = new Date();
 
   await deposit.save();
+
+  recordActivity({
+    userId: deposit.user,
+    action: ACTIVITY_ACTIONS.DEPOSIT_REJECTED,
+    actorId: adminId || null,
+    actorType: ACTOR_TYPES.ADMIN,
+    ip,
+  }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
+
   return deposit;
 }
 
@@ -757,6 +809,7 @@ export async function editDepositAmountService({
   depositId,
   newAmount,
   adminId,
+  ip = null,
 }) {
   if (!depositId) {
     throw new Error("Deposit ID is required");
@@ -784,6 +837,14 @@ export async function editDepositAmountService({
   deposit.updatedAt = new Date();
 
   await deposit.save();
+
+  recordActivity({
+    userId: deposit.user,
+    action: ACTIVITY_ACTIONS.DEPOSIT_AMOUNT_EDITED,
+    actorId: adminId || null,
+    actorType: ACTOR_TYPES.ADMIN,
+    ip,
+  }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
 
   return {
     _id: deposit._id,
@@ -839,6 +900,7 @@ export async function adminCreateDepositService({
   let engineNewBalance = null;
   let engineBonusBalance = null;
   let referralMeta = null;
+  let createdUserId = null;
 
   try {
     await session.withTransaction(async () => {
@@ -924,6 +986,7 @@ export async function adminCreateDepositService({
           depositId: createdDeposit[0]._id,
         };
       }
+      createdUserId = account.user_id;
     });
 
     // Sync engine after DB commit
@@ -950,6 +1013,16 @@ export async function adminCreateDepositService({
           referralErr?.message || referralErr,
         );
       }
+    }
+
+    if (createdUserId) {
+      recordActivity({
+        userId: createdUserId,
+        action: ACTIVITY_ACTIONS.DEPOSIT_CREATED_BY_ADMIN,
+        actorId: adminId || null,
+        actorType: ACTOR_TYPES.ADMIN,
+        ip: safeIp,
+      }).catch((err) => console.error("ACTIVITY_LOG_ERROR:", err));
     }
 
     return createdDeposit?.[0] || null;

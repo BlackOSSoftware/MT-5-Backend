@@ -105,7 +105,7 @@ async function findPendingForDelete({ accountId, userId, orderId }) {
   return order;
 }
 
-export async function adminDeleteTradeService(body = {}, { actorId } = {}) {
+export async function adminDeleteTradeService(body = {}, { actorId, ip } = {}) {
   const target = normalizeTradeDeleteTarget(body);
 
   const account = await Account.findOne({
@@ -128,6 +128,7 @@ export async function adminDeleteTradeService(body = {}, { actorId } = {}) {
       action: ACTIVITY_ACTIONS.TRADE_DELETED_BY_ADMIN,
       actorId: actorId ? String(actorId) : null,
       actorType: ACTOR_TYPES.ADMIN,
+      ip: ip || null,
     });
 
     return {
@@ -161,6 +162,7 @@ export async function adminDeleteTradeService(body = {}, { actorId } = {}) {
     action: ACTIVITY_ACTIONS.TRADE_DELETED_BY_ADMIN,
     actorId: actorId ? String(actorId) : null,
     actorType: ACTOR_TYPES.ADMIN,
+    ip: ip || null,
   });
 
   return {
@@ -171,7 +173,7 @@ export async function adminDeleteTradeService(body = {}, { actorId } = {}) {
   };
 }
 
-export async function adminRestoreTradeService(body = {}, { actorId } = {}) {
+export async function adminRestoreTradeService(body = {}, { actorId, ip } = {}) {
   const target = normalizeTradeDeleteTarget(body);
 
   const account = await Account.findOne({
@@ -222,6 +224,7 @@ export async function adminRestoreTradeService(body = {}, { actorId } = {}) {
       action: ACTIVITY_ACTIONS.TRADE_RESTORED_BY_ADMIN,
       actorId: actorId ? String(actorId) : null,
       actorType: ACTOR_TYPES.ADMIN,
+      ip: ip || null,
     });
 
     return {
@@ -271,6 +274,7 @@ export async function adminRestoreTradeService(body = {}, { actorId } = {}) {
     action: ACTIVITY_ACTIONS.TRADE_RESTORED_BY_ADMIN,
     actorId: actorId ? String(actorId) : null,
     actorType: ACTOR_TYPES.ADMIN,
+    ip: ip || null,
   });
 
   return {

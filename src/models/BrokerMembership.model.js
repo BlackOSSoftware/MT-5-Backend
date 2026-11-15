@@ -46,6 +46,13 @@ const BrokerMembershipSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+    /** Admin user who created this membership (null = created by SuperAdmin). */
+    parentAdminId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
     acceptedAt: { type: Date, default: null },
   },
   { timestamps: true }
