@@ -5,6 +5,7 @@ import UserDevice from '../models/UserDevice.model.js';
 import PublicNotification from '../models/PublicNotification.model.js';
 import AdminNotificationRead from '../models/AdminNotificationRead.model.js';
 import UserNotificationRead from '../models/UserNotificationRead.model.js';
+import Account from '../models/Account.model.js';
 import AccountAuth from '../models/AccountAuth.model.js';
 import User from '../models/User.model.js';
 import BrokerMembership from '../models/BrokerMembership.model.js';
@@ -12,9 +13,22 @@ import { MEMBERSHIP_STATUS } from '../constants/brokerPermissions.js';
 import { sendNotificationMail } from '../utils/mail.util.js';
 
 export const NOTIFICATION_AUDIENCES = ['USERS', 'ADMINS'];
+/** Where to push FCM: web portal, mobile app, or both. */
+export const PUSH_CHANNELS = ['WEB', 'APP', 'BOTH'];
 
 /** FCM multicast accepts at most 500 tokens per call. */
 const FCM_BATCH_SIZE = 500;
+
+function normalizePushChannel(value) {
+  const v = String(value || 'BOTH').trim().toUpperCase();
+  return PUSH_CHANNELS.includes(v) ? v : 'BOTH';
+}
+
+function normalizeSendEmail(value) {
+  if (value === true || value === 1 || value === '1') return true;
+  if (typeof value === 'string' && value.trim().toLowerCase() === 'true') return true;
+  return false;
+}
 
 const stringifyData = (data) =>
   Object.fromEntries(Object.entries(data || {}).map(([k, v]) => [k, String(v ?? '')]));
@@ -52,28 +66,65 @@ async function resolveBroadcastUserIds({ audience, brokerId }) {
   return users.map((u) => String(u._id));
 }
 
-/** Portal / Oceana app device tokens + trade-session tokens for these users. */
-async function tokensForUsers(userIds) {
+/**
+ * Portal / Oceana app device tokens (+ trade-session tokens for APP).
+ * @param {'WEB'|'APP'|'BOTH'} channel
+ */
+async function tokensForUsers(userIds, channel = 'BOTH') {
   if (!userIds.length) return [];
-  const ids = userIds.filter((id) => mongoose.isValidObjectId(id));
+  const ids = userIds
+    .filter((id) => mongoose.isValidObjectId(id))
+    .map((id) => new mongoose.Types.ObjectId(String(id)));
+  if (!ids.length) return [];
+
+  const pushChannel = normalizePushChannel(channel);
+  const includeWeb = pushChannel === 'WEB' || pushChannel === 'BOTH';
+  const includeApp = pushChannel === 'APP' || pushChannel === 'BOTH';
+
+  const deviceFilter = {
+    user_id: { $in: ids },
+    fcm_token: { $exists: true, $nin: [null, ''] },
+  };
+  if (includeWeb && !includeApp) {
+    deviceFilter.platform = { $regex: /^web$/i };
+  } else if (includeApp && !includeWeb) {
+    deviceFilter.platform = { $regex: /^(android|ios|mobile)$/i };
+  }
+
+  // AccountAuth tokens come from trade/mobile sessions — only for APP/BOTH.
+  let accountIds = [];
+  if (includeApp) {
+    const accountRows = await Account.find(
+      { user_id: { $in: ids } },
+      { _id: 1 },
+    ).lean();
+    accountIds = accountRows.map((a) => a._id);
+  }
+
   const [devices, accounts] = await Promise.all([
-    UserDevice.find(
-      { user_id: { $in: ids }, fcm_token: { $exists: true, $ne: '' } },
-      { fcm_token: 1, _id: 0 },
-    ).lean(),
-    AccountAuth.find(
-      { user_id: { $in: ids }, fcm_token: { $exists: true, $ne: '' } },
-      { fcm_token: 1, _id: 0 },
-    ).lean(),
+    UserDevice.find(deviceFilter, { fcm_token: 1, _id: 0 }).lean(),
+    includeApp && accountIds.length
+      ? AccountAuth.find(
+          {
+            account_id: { $in: accountIds },
+            fcm_token: { $exists: true, $nin: [null, ''] },
+          },
+          { fcm_token: 1, _id: 0 },
+        ).lean()
+      : Promise.resolve([]),
   ]);
   return [...new Set([...devices, ...accounts].map((d) => d.fcm_token).filter(Boolean))];
 }
 
 /** Dry run: how many people / devices a broadcast would reach (no DB write, no push). */
-export async function previewBroadcastRecipients({ audience = 'USERS', brokerId = null } = {}) {
+export async function previewBroadcastRecipients({
+  audience = 'USERS',
+  brokerId = null,
+  pushChannel = 'BOTH',
+} = {}) {
   const userIds = await resolveBroadcastUserIds({ audience, brokerId });
-  const tokens = await tokensForUsers(userIds);
-  return { recipients: userIds.length, devices: tokens.length };
+  const tokens = await tokensForUsers(userIds, pushChannel);
+  return { recipients: userIds.length, devices: tokens.length, pushChannel: normalizePushChannel(pushChannel) };
 }
 
 /** Token belongs to another Firebase project (e.g. the mobile app's). */
@@ -120,14 +171,25 @@ async function pushToTokens(tokens, payload) {
 
   const appMessaging = getAppMessaging();
   const mismatched = failures.filter((f) => MISMATCH_CODES.has(f.error)).map((f) => f.token);
-  if (appMessaging && mismatched.length) {
-    const retry = await sendBatches(appMessaging, mismatched, payload);
-    successCount += retry.successCount;
-    failures = [...failures.filter((f) => !MISMATCH_CODES.has(f.error)), ...retry.failures];
+  if (mismatched.length) {
+    if (appMessaging) {
+      const retry = await sendBatches(appMessaging, mismatched, payload);
+      successCount += retry.successCount;
+      failures = [...failures.filter((f) => !MISMATCH_CODES.has(f.error)), ...retry.failures];
+    } else {
+      console.error(
+        `[FCM] ${mismatched.length} token(s) belong to another Firebase project; ` +
+          'add firebase-admin-key-app.json (or FIREBASE_APP_KEY_PATH) to deliver them',
+      );
+    }
   }
 
   for (const f of failures) {
-    if (!DEAD_TOKEN_CODES.has(f.error)) continue;
+    // Dead tokens + unrecoverable project-mismatch (no secondary key) → drop.
+    const drop =
+      DEAD_TOKEN_CODES.has(f.error) ||
+      (!appMessaging && MISMATCH_CODES.has(f.error));
+    if (!drop) continue;
     UserDevice.deleteOne({ fcm_token: f.token }).catch((err) => {
       console.error('Failed to delete invalid token', f.token, err);
     });
@@ -207,6 +269,8 @@ export async function broadcastNotification({
   brokerId = null,
   audience = 'USERS',
   sentBy = null,
+  sendEmail = false,
+  pushChannel = 'BOTH',
 }) {
   if (!title || !message || !expireAt) {
     throw new Error('title, message and expireAt are required');
@@ -217,10 +281,17 @@ export async function broadcastNotification({
   if (Number.isNaN(expiryDate.getTime())) throw new Error('Invalid expireAt date');
   if (expiryDate <= new Date()) throw new Error('expireAt must be a future date');
 
+  const channel = normalizePushChannel(pushChannel);
+  const wantEmail = normalizeSendEmail(sendEmail);
+
   await PublicNotification.create({
     title,
     message,
-    data: data || {},
+    data: {
+      ...(data || {}),
+      pushChannel: channel,
+      sendEmail: wantEmail,
+    },
     user_id: null,
     brokerId: brokerId || null,
     audience,
@@ -229,21 +300,35 @@ export async function broadcastNotification({
   });
 
   const userIds = await resolveBroadcastUserIds({ audience, brokerId });
-  const tokens = await tokensForUsers(userIds);
+  const tokens = await tokensForUsers(userIds, channel);
 
-  // Email copy for client users (broker-scoped recipients only).
-  if (audience === 'USERS' && userIds.length) {
+  // Email only when admin explicitly opts in.
+  if (wantEmail && audience === 'USERS' && userIds.length) {
     emailNotificationToUsers({ userIds, title, message, brokerId }).catch(
       () => {},
     );
   }
 
   if (!tokens.length) {
-    return { saved: true, pushed: false, recipients: userIds.length, reason: 'No active FCM tokens' };
+    return {
+      saved: true,
+      pushed: false,
+      recipients: userIds.length,
+      pushChannel: channel,
+      sendEmail: wantEmail,
+      reason: `No active FCM tokens for ${channel}`,
+    };
   }
 
   const push = await pushToTokens(tokens, { title, message, data });
-  return { saved: true, pushed: true, recipients: userIds.length, ...push };
+  return {
+    saved: true,
+    pushed: true,
+    recipients: userIds.length,
+    pushChannel: channel,
+    sendEmail: wantEmail,
+    ...push,
+  };
 }
 
 
@@ -251,18 +336,29 @@ export async function broadcastNotification({
  * Send to a specific user — prefers UserDevice FCM tokens (mobile/web),
  * falls back to AccountAuth.fcm_token for older trade sessions.
  */
-export async function sendUserNotification({ userId, title, message, data }) {
+export async function sendUserNotification({
+  userId,
+  title,
+  message,
+  data,
+  pushChannel = 'BOTH',
+}) {
   if (!userId || !title || !message) {
     throw new Error('userId, title and message are required');
   }
 
-  const tokens = await tokensForUsers([String(userId)]);
+  const channel = normalizePushChannel(pushChannel);
+  const tokens = await tokensForUsers([String(userId)], channel);
   if (!tokens.length) {
-    return { success: false, message: 'No active device tokens' };
+    return {
+      success: false,
+      message: `No active device tokens for ${channel}`,
+      pushChannel: channel,
+    };
   }
 
   const push = await pushToTokens(tokens, { title, message, data });
-  return { success: true, ...push };
+  return { success: true, pushChannel: channel, ...push };
 }
 
 /**
@@ -294,6 +390,8 @@ export async function sendAdminUserNotification({
   expireAt,
   brokerId = null,
   sentBy = null,
+  sendEmail = false,
+  pushChannel = 'BOTH',
 }) {
   if (!title || !message || !expireAt) {
     throw new Error('title, message and expireAt are required');
@@ -302,6 +400,9 @@ export async function sendAdminUserNotification({
   const expiryDate = new Date(expireAt);
   if (Number.isNaN(expiryDate.getTime())) throw new Error('Invalid expireAt date');
   if (expiryDate <= new Date()) throw new Error('expireAt must be a future date');
+
+  const channel = normalizePushChannel(pushChannel);
+  const wantEmail = normalizeSendEmail(sendEmail);
 
   let user = null;
   if (userId && mongoose.isValidObjectId(userId)) {
@@ -319,7 +420,11 @@ export async function sendAdminUserNotification({
   const notification = await PublicNotification.create({
     title,
     message,
-    data: data || {},
+    data: {
+      ...(data || {}),
+      pushChannel: channel,
+      sendEmail: wantEmail,
+    },
     user_id: user._id,
     brokerId: user.brokerId || brokerId || null,
     audience: 'USERS',
@@ -332,20 +437,24 @@ export async function sendAdminUserNotification({
     title,
     message,
     data: data || {},
+    pushChannel: channel,
   });
 
-  // Email copy to the targeted user (their broker's SMTP).
-  emailNotificationToUsers({
-    userIds: [user._id],
-    title,
-    message,
-    brokerId: user.brokerId || brokerId || null,
-  }).catch(() => {});
+  if (wantEmail) {
+    emailNotificationToUsers({
+      userIds: [user._id],
+      title,
+      message,
+      brokerId: user.brokerId || brokerId || null,
+    }).catch(() => {});
+  }
 
   return {
     notification,
     user: { _id: user._id, email: user.email, name: user.name },
     push,
+    sendEmail: wantEmail,
+    pushChannel: channel,
   };
 }
 

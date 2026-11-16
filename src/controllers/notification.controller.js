@@ -71,6 +71,8 @@ export async function adminBroadcastNotification(req, res) {
       brokerId: req.brokerId || null,
       audience,
       sentBy: req.user?._id || null,
+      sendEmail: req.body.sendEmail,
+      pushChannel: req.body.pushChannel,
     });
 
     logAdminAction({
@@ -80,12 +82,22 @@ export async function adminBroadcastNotification(req, res) {
       userAgent: req.headers?.['user-agent'] || null,
       description: `Broadcast notification: ${title}`,
       targetEntityType: 'notification',
-      metadata: { title, audience },
+      metadata: {
+        title,
+        audience,
+        pushChannel: result?.pushChannel || req.body.pushChannel || 'BOTH',
+        sendEmail: Boolean(result?.sendEmail),
+      },
     }).catch(() => {});
 
+    const pushed = result?.pushed === true && Number(result?.successCount || 0) > 0;
     return res.json({
       success: true,
-      message: audience === 'ADMINS' ? 'Notification sent to admins' : 'Notification sent to users',
+      message: !result?.pushed
+        ? (result?.reason || 'Saved, but no device tokens to push')
+        : pushed
+          ? (audience === 'ADMINS' ? 'Notification pushed to admins' : 'Notification pushed to users')
+          : 'Saved to inbox, but FCM push failed for all devices',
       result,
     });
   } catch (err) {
@@ -122,6 +134,8 @@ export async function adminSendUserNotification(req, res) {
       expireAt,
       brokerId: req.brokerId || null,
       sentBy: req.user?._id || null,
+      sendEmail: req.body.sendEmail,
+      pushChannel: req.body.pushChannel,
     });
 
     logAdminAction({
@@ -132,12 +146,23 @@ export async function adminSendUserNotification(req, res) {
       userAgent: req.headers?.['user-agent'] || null,
       description: `Notification sent: ${title}`,
       targetEntityType: 'notification',
-      metadata: { title, email: result?.user?.email || email || null },
+      metadata: {
+        title,
+        email: result?.user?.email || email || null,
+        pushChannel: result?.pushChannel || req.body.pushChannel || 'BOTH',
+        sendEmail: Boolean(result?.sendEmail),
+      },
     }).catch(() => {});
 
+    const pushOk = Number(result?.push?.successCount || 0) > 0;
+    const noTokens = result?.push?.success === false;
     return res.json({
       success: true,
-      message: `Notification sent to ${result.user.email}`,
+      message: noTokens
+        ? `Saved for ${result.user.email}, but no active device token (ask user to open the app once)`
+        : pushOk
+          ? `Notification pushed to ${result.user.email}`
+          : `Saved for ${result.user.email}, but FCM push failed (stale/wrong Firebase token)`,
       result,
     });
   } catch (err) {

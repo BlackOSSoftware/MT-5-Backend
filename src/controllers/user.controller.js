@@ -113,6 +113,14 @@ export async function saveFcmToken(req, res) {
       { upsert: true, new: true }
     );
 
+    // Keep one live token per platform for this user — clears stale tokens
+    // from older Firebase projects / reinstalls that cause mismatched-credential.
+    await UserDevice.deleteMany({
+      user_id: userId,
+      platform: plat,
+      fcm_token: { $ne: token },
+    });
+
     return res.json({
       success: true,
       message: "FCM token saved",
