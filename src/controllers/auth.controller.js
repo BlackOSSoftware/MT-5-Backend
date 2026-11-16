@@ -12,6 +12,7 @@ import {
   changeMyPasswordService
 } from '../services/auth.service.js';
 import { getClientIp } from '../utils/clientIp.js';
+import { appLockErrorBody, isAppLockError } from '../utils/appLock.js';
 
 /* ================= SIGNUP ================= */
 
@@ -190,6 +191,9 @@ export async function login(req, res) {
       }
     });
   } catch (e) {
+    if (isAppLockError(e)) {
+      return res.status(401).json(appLockErrorBody());
+    }
     return res.status(400).json({
       success: false,
       message: 'Invalid credentials'
@@ -258,6 +262,9 @@ export async function refreshToken(req, res) {
 
     res.json({ success: true, data });
   } catch (e) {
+    if (isAppLockError(e)) {
+      return res.status(401).json(appLockErrorBody());
+    }
     res.status(401).json({ success: false, message: e.message });
   }
 }

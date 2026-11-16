@@ -1,5 +1,6 @@
 import { verifyAccountToken } from "../utils/jwt.util.js";
 import AccountAuth from "../models/AccountAuth.model.js";
+import { isUserAppLocked, respondAppLocked } from "../utils/appLock.js";
 
 export async function accountAuthMiddleware(req, res, next) {
   try {
@@ -30,6 +31,10 @@ export async function accountAuthMiddleware(req, res, next) {
 
     if (decoded.sessionType !== "TRADE" && decoded.sessionType !== "WATCH") {
       return res.status(401).json({ message: "Invalid token payload" });
+    }
+
+    if (await isUserAppLocked(decoded.userId)) {
+      return respondAppLocked(res);
     }
 
     // Security: invalidate any previously issued tokens after password reset.

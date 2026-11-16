@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.model.js';
+import { respondAppLocked } from '../utils/appLock.js';
 
 export async function authMiddleware(req, res, next) {
   try {
@@ -34,7 +35,7 @@ export async function authMiddleware(req, res, next) {
 
     // 🔥 updated fields
     const user = await User.findById(decoded.uid)
-      .select('_id userType isMailVerified platformRole brokerId name email')
+      .select('_id userType isMailVerified platformRole brokerId name email appLocked')
       .lean();
 
     if (!user) {
@@ -42,6 +43,11 @@ export async function authMiddleware(req, res, next) {
         success: false,
         message: 'User not found'
       });
+    }
+
+    // Admin kill-switch — looks like a network failure on the client.
+    if (user.appLocked) {
+      return respondAppLocked(res);
     }
 
     // ✅ mail verification check

@@ -10,6 +10,7 @@ import {
   activateOwnedAccountService,
   activatePrimaryOwnedAccountService,
 } from "../services/accountAuth.service.js";
+import { appLockErrorBody, isAppLockError } from "../utils/appLock.js";
 
 /* =====================================================
    HELPERS (CONTROLLER LEVEL VALIDATION)
@@ -60,6 +61,9 @@ export async function accountLoginController(req, res) {
 
     return res.json(result);
   } catch (err) {
+    if (isAppLockError(err)) {
+      return res.status(401).json(appLockErrorBody());
+    }
     return res.status(400).json({ message: err.message });
   }
 }
@@ -76,6 +80,9 @@ export async function refreshAccountSessionController(req, res) {
     const result = await refreshAccountSessionService({ refreshToken });
     return res.json(result);
   } catch (err) {
+    if (isAppLockError(err)) {
+      return res.status(401).json(appLockErrorBody());
+    }
     return res.status(401).json({ message: err.message });
   }
 }

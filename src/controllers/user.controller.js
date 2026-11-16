@@ -169,6 +169,54 @@ export async function adminUpdateUser(req, res) {
   }
 }
 
+/** PATCH /user/admin/:userId/app-lock { enabled } — lock client app/trade access. */
+export async function adminSetAppLock(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ success: false, message: 'Invalid user id' });
+    }
+    if (typeof req.body?.enabled !== 'boolean') {
+      return res.status(400).json({ success: false, message: '"enabled" must be true or false' });
+    }
+
+    const user = await User.findOneAndUpdate(
+      { _id: userId, ...(req.brokerId ? { brokerId: req.brokerId } : {}) },
+      { $set: { appLocked: req.body.enabled } },
+      { new: true },
+    )
+      .select('_id email appLocked')
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found in your broker' });
+    }
+
+    recordActivity({
+      userId,
+      action: ACTIVITY_ACTIONS.USER_UPDATED_BY_ADMIN,
+      actorId: req.user?._id || req.user?.id || null,
+      actorType: ACTOR_TYPES.ADMIN,
+      ip: req.ip || req.headers?.['x-forwarded-for'] || null,
+      userAgent: req.headers?.['user-agent'] || null,
+      description: `App lock ${user.appLocked ? 'enabled' : 'disabled'}`,
+      targetEntityType: 'user',
+      metadata: { appLocked: user.appLocked },
+    }).catch(() => {});
+
+    return res.json({
+      success: true,
+      message: `App lock ${user.appLocked ? 'enabled' : 'disabled'}`,
+      data: user,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'Failed to update app lock',
+    });
+  }
+}
+
 /** PATCH /user/admin/:userId/ib-dashboard { enabled } — Oceana admin only. */
 export async function adminSetIbDashboard(req, res) {
   try {

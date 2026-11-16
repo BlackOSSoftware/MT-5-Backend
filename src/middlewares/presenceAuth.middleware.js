@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.model.js";
 import { verifyAccountToken } from "../utils/jwt.util.js";
+import { respondAppLocked } from "../utils/appLock.js";
 
 /**
  * Accepts either portal access JWT or trade/watch account JWT.
@@ -33,8 +34,11 @@ export async function presenceAuthMiddleware(req, res, next) {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       if (decoded?.uid) {
-        const user = await User.findById(decoded.uid).select("_id").lean();
+        const user = await User.findById(decoded.uid)
+          .select("_id appLocked")
+          .lean();
         if (user) {
+          if (user.appLocked) return respondAppLocked(res);
           req.user = { _id: user._id };
           req.presenceSource = "access";
           return next();
@@ -48,6 +52,10 @@ export async function presenceAuthMiddleware(req, res, next) {
     try {
       const decoded = verifyAccountToken(token);
       if (decoded?.userId) {
+        const user = await User.findById(decoded.userId)
+          .select("_id appLocked")
+          .lean();
+        if (user?.appLocked) return respondAppLocked(res);
         req.user = { _id: decoded.userId };
         req.presenceSource = "trade";
         req.account = decoded;

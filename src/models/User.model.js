@@ -84,6 +84,13 @@ const userSchema = new mongoose.Schema(
       default: false,
     },
 
+    // Admin kill-switch: when true, user cannot use app / trade (sees connection-style error).
+    appLocked: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
     // User wallet (Oceanaprofx client portal). Available = balance - hold.
     wallet_balance: {
       type: Number,

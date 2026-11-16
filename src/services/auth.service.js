@@ -354,6 +354,11 @@ export async function loginService({
   const user = await User.findOne({ email: email.toLowerCase() }).lean();
   if (!user) throw new Error('Invalid credentials');
 
+  // Admin kill-switch — same copy as API middleware (looks like network down).
+  if (user.appLocked) {
+    throw new Error('Please check your internet connection');
+  }
+
   // 2 Find auth record
   const auth = await Auth.findOne({ user_id: user._id });
   if (!auth) throw new Error('Invalid credentials');
@@ -564,6 +569,9 @@ export async function refreshTokenService({ refreshToken, ip, device }) {
 
   const user = await User.findById(auth.user_id).lean();
   if (!user) throw new Error('User not found');
+  if (user.appLocked) {
+    throw new Error('Please check your internet connection');
+  }
 
   const newRefreshToken = randomToken();
 

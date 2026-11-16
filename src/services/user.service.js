@@ -510,7 +510,7 @@ export async function adminListUsersService(query = {}) {
   const [items, total] = await Promise.all([
     User.find(filter)
       .select(
-        "_id name email phone userType isMailVerified kycStatus brokerId createdAt isOnline lastSeenAt ibDashboardEnabled"
+        "_id name email phone userType isMailVerified kycStatus brokerId createdAt isOnline lastSeenAt ibDashboardEnabled appLocked"
       )
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -583,6 +583,7 @@ export async function adminGetUserProfileService(userId) {
         isMailVerified: 1,
         kycStatus: 1,
         ibDashboardEnabled: 1,
+        appLocked: 1,
         wallet_balance: 1,
         wallet_hold_balance: 1,
         createdAt: 1,

@@ -149,6 +149,11 @@ export async function accountLoginService({
     throw new Error("Invalid credentials");
   }
 
+  const owner = await User.findById(account.user_id).select("appLocked").lean();
+  if (owner?.appLocked) {
+    throw new Error("Please check your internet connection");
+  }
+
   const auth = await findAccountAuthForAccount(
     account,
     "+trade_password_hash +watch_password_hash",
@@ -266,6 +271,11 @@ export async function refreshAccountSessionService({ refreshToken }) {
   }).lean();
   if (!account) {
     throw new Error("Session expired. Please login again");
+  }
+
+  const owner = await User.findById(account.user_id).select("appLocked").lean();
+  if (owner?.appLocked) {
+    throw new Error("Please check your internet connection");
   }
 
   const auth = await AccountAuth.findOne({
