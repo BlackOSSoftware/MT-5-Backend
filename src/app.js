@@ -5,8 +5,10 @@ import routes from './routes/index.js';
 import { DOWNLOADS_DIR, DOWNLOADS_ROUTE } from './modules/app-update/index.js';
 
 const app = express();
-// Trust the first proxy hop (nginx/Cloudflare) so req.ip is the real client IP.
-app.set('trust proxy', 1);
+// Trust only private/loopback proxy hops (nginx on same host, docker networks).
+// Express then resolves req.ip to the first PUBLIC address in X-Forwarded-For,
+// which is the real client — client-supplied spoofed XFF entries are ignored.
+app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 // updated
 app.disable('x-powered-by');
 

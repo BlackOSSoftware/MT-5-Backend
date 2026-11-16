@@ -11,6 +11,7 @@ import {
   adminChangeUserPasswordService,
   changeMyPasswordService
 } from '../services/auth.service.js';
+import { getClientIp } from '../utils/clientIp.js';
 
 /* ================= SIGNUP ================= */
 
@@ -34,10 +35,7 @@ function hostFromRequest(req) {
 
 export async function signup(req, res) {
   try {
-    const ip =
-      req.headers['x-forwarded-for']?.split(',')[0] ||
-      req.socket?.remoteAddress ||
-      null;
+    const ip = getClientIp(req);
 
     const data = await signupService({
       ...req.body,
@@ -60,10 +58,7 @@ export async function signup(req, res) {
 /* ================= ADMIN SIGNUP (ADMIN ONLY) ================= */
 export async function adminSignup(req, res) {
   try {
-    const ip =
-      req.headers['x-forwarded-for']?.split(',')[0] ||
-      req.socket?.remoteAddress ||
-      null;
+    const ip = getClientIp(req);
 
     // Broker Admin: always scope to their broker.
     // SuperAdmin: optional body.brokerId / x-broker-id to place user under a tenant.
@@ -177,7 +172,7 @@ export async function login(req, res) {
     } = await loginService({
       email,
       password,
-      ip: req.ip,
+      ip: getClientIp(req),
       device: req.headers['user-agent'] || null,
       fcmToken
     });
@@ -257,7 +252,7 @@ export async function refreshToken(req, res) {
   try {
     const data = await refreshTokenService({
       refreshToken: req.body.refreshToken,
-      ip: req.ip,
+      ip: getClientIp(req),
       device: req.headers['user-agent']
     });
 
@@ -273,7 +268,7 @@ export async function logout(req, res) {
   try {
     await logoutService({
       refreshToken: req.body.refreshToken,
-      ip: req.ip,
+      ip: getClientIp(req),
       userAgent: req.headers['user-agent'] || null
     });
 

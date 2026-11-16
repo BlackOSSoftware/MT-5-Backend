@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import ActivityLog, { ACTIVITY_CATEGORIES } from '../models/ActivityLog.model.js';
 import User from '../models/User.model.js';
+import { normalizeIp } from '../utils/clientIp.js';
 
 export const ACTIVITY_ACTIONS = Object.freeze({
   USER_CREATED: 'USER_CREATED',
@@ -245,7 +246,7 @@ export async function recordActivity({
     category: category || getActionCategory(action),
     actor_type: actorType,
     status: status === 'FAILED' ? 'FAILED' : 'SUCCESS',
-    ip: ip ? String(ip).slice(0, 64) : null,
+    ip: normalizeIp(ip),
     user_agent: userAgent ? String(userAgent).slice(0, 300) : null,
     description: description ? String(description).slice(0, 500) : null
   };

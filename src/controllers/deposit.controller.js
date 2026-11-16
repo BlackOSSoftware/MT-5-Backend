@@ -9,6 +9,7 @@ import {
   editDepositAmountService,
   adminCreateDepositService
 } from '../services/deposit.service.js';
+import { getClientIp } from '../utils/clientIp.js';
 
 /* USER: CREATE DEPOSIT */
 export async function createDeposit(req, res) {
@@ -206,11 +207,7 @@ export async function adminCreateDeposit(req, res) {
     const proof = req.body?.proof;
     const parsedAmount =
       typeof amount === "number" ? amount : Number(amount);
-    const ipAddress =
-      req.ip ||
-      req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() ||
-      req.socket?.remoteAddress ||
-      "127.0.0.1";
+    const ipAddress = getClientIp(req) || "127.0.0.1";
 
     const deposit = await adminCreateDepositService({
       accountId,

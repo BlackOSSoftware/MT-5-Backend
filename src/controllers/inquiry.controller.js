@@ -5,6 +5,7 @@ import {
   updateInquiryStatusService,
   formatTicketId,
 } from '../services/inquiry.service.js';
+import { getClientIp } from '../utils/clientIp.js';
 
 /**
  * USER CREATE INQUIRY
@@ -29,9 +30,7 @@ export async function createInquiry(req, res) {
       });
     }
 
-    const ip =
-      req.headers['x-forwarded-for']?.split(',')[0] ||
-      req.socket.remoteAddress;
+    const ip = getClientIp(req);
 
     const inquiry = await createInquiryService({
       name,

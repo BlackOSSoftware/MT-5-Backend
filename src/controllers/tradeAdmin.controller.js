@@ -32,6 +32,7 @@ import {
   assertUserBelongsToBroker,
   withBrokerQuery,
 } from "../utils/brokerScope.js";
+import { getClientIp } from "../utils/clientIp.js";
 import {
   ACTIVITY_ACTIONS,
   ACTOR_TYPES,
@@ -74,12 +75,7 @@ function toMaybeFiniteNumber(value, fieldName) {
 }
 
 function getRequestIp(req) {
-  const forwarded = req?.headers?.["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.trim()) {
-    return forwarded.split(",")[0].trim();
-  }
-
-  return req?.ip || req?.connection?.remoteAddress || "SYSTEM";
+  return getClientIp(req) || "SYSTEM";
 }
 
 function toDate(value, fieldName) {
