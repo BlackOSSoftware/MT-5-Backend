@@ -1016,7 +1016,14 @@ function broadcastData(market, data) {
           let formatted = null;
           if (!isSilverSymbol(symbol) && typeof tradeEngine.formatPrice === "function") {
             try {
-              const maybe = tradeEngine.formatPrice(accountForPrice, sym, bestBid, bestAsk);
+              // Pass feed symbol explicitly — engine symbol objects may omit code.
+              const maybe = tradeEngine.formatPrice(
+                accountForPrice,
+                sym,
+                bestBid,
+                bestAsk,
+                symbol,
+              );
               if (maybe && typeof maybe.bid === "number" && typeof maybe.ask === "number" && Number.isFinite(maybe.bid) && Number.isFinite(maybe.ask)) {
                 formatted = { bid: maybe.bid, ask: maybe.ask, src: "engine.formatPrice" };
               } else {

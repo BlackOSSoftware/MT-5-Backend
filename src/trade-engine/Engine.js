@@ -293,8 +293,12 @@ export class Engine {
         ? safeContractSize
         : 1;
 
-    this.symbols.set(symbol, {
+    const code = String(symbol || "").trim().toUpperCase();
+    this.symbols.set(code || symbol, {
       ...config,
+      // Required for plan-spread lookup in formatPrice (Map value had no code before).
+      code,
+      symbol: code,
       contractSize,
       bid: 0,
       ask: 0,
@@ -412,15 +416,19 @@ export class Engine {
    *  - rounding to sym.tickSize
    *  - fixed to sym.pricePrecision
    */
-  formatPrice(account, sym, bid, ask) {
+  formatPrice(account, sym, bid, ask, symbolHint = null) {
     let outBid = Number(bid);
     let outAsk = Number(ask);
 
     // Prefer in-memory plan×symbol width when PLAN_SPREAD_PRICING is on.
     // Never add plan + instrument spreads together. Hot path = Map lookup only.
-    const symCode = String(sym?.code || sym?.symbol || "").toUpperCase();
+    const symCode = String(
+      sym?.code || sym?.symbol || symbolHint || "",
+    )
+      .trim()
+      .toUpperCase();
     const planCached =
-      isPlanSpreadPricingEnabled() && account?.account_plan_id
+      isPlanSpreadPricingEnabled() && account?.account_plan_id && symCode
         ? getCachedPlanSpread(account.account_plan_id, symCode)
         : null;
     const planSpread =
