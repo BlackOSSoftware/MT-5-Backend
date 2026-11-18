@@ -112,6 +112,8 @@ export async function bootstrapEngine({ accounts, symbols }) {
   ========================= */
 
   for (const sym of symbols) {
+    const minQty = Number(sym.minQty);
+    const maxQty = Number(sym.maxQty);
     tradeEngine.loadSymbol(sym.code, {
       // Segment is used for market open/close checks (forex/crypto/metal etc).
       // Normalize to lowercase to match MarketSchedule segment keys.
@@ -130,6 +132,8 @@ export async function bootstrapEngine({ accounts, symbols }) {
         typeof sym.pricePrecision === "number"
           ? sym.pricePrecision
           : undefined,
+      minQty: Number.isFinite(minQty) && minQty > 0 ? minQty : 0.01,
+      maxQty: Number.isFinite(maxQty) && maxQty > 0 ? maxQty : undefined,
     });
   }
 

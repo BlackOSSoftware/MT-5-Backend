@@ -317,6 +317,14 @@ export const updateInstrumentService = async (id, payload) => {
     nextProviderCode
   );
 
+  // Property page / order UI cache must pick up new minQty/maxQty immediately.
+  try {
+    const { invalidatePropertyCache } = await import("./property.service.js");
+    await invalidatePropertyCache();
+  } catch {
+    // non-fatal
+  }
+
   // Sync symbol into trade engine (RAM)
   EngineSync.loadSymbolFromInstrument(updated);
   publishSymbolUpsert(updated);

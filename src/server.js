@@ -138,6 +138,9 @@ async function bootstrapTradeEngine() {
       spread_mode: 1,
       tickSize: 1,
       pricePrecision: 1,
+      minQty: 1,
+      maxQty: 1,
+      lotSize: 1,
     },
   ).lean();
 

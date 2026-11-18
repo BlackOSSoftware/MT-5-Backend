@@ -360,6 +360,8 @@ class EngineSync {
       return;
     }
 
+    const minQty = Number(instrument.minQty);
+    const maxQty = Number(instrument.maxQty);
     tradeEngine.loadSymbol(code, {
       // Segment is used for market schedule validation inside the engine.
       segment: instrument.segment ? String(instrument.segment).trim().toLowerCase() : undefined,
@@ -375,6 +377,9 @@ class EngineSync {
         typeof instrument.pricePrecision === "number"
           ? instrument.pricePrecision
           : undefined,
+      // Lot limits from admin Instruments Management (enforced on place/modify).
+      minQty: Number.isFinite(minQty) && minQty > 0 ? minQty : 0.01,
+      maxQty: Number.isFinite(maxQty) && maxQty > 0 ? maxQty : undefined,
     });
 
     console.log("[ENGINE_SYNC] symbol synced:", code);

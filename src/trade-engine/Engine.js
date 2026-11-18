@@ -367,6 +367,27 @@ export class Engine {
     return { sym, status };
   }
 
+  /** Enforce admin Instruments minQty / maxQty on every order volume. */
+  assertVolumeAllowed(sym, volume, { label = "Volume" } = {}) {
+    const vol = Number(volume);
+    if (!Number.isFinite(vol) || vol <= 0) {
+      throw new Error(`${label} must be a positive number`);
+    }
+
+    const minQty = Number(sym?.minQty);
+    const maxQty = Number(sym?.maxQty);
+    const eps = 1e-9;
+
+    if (Number.isFinite(minQty) && minQty > 0 && vol + eps < minQty) {
+      throw new Error(`${label} must be at least ${minQty}`);
+    }
+    if (Number.isFinite(maxQty) && maxQty > 0 && vol - eps > maxQty) {
+      throw new Error(`${label} cannot exceed ${maxQty}`);
+    }
+
+    return vol;
+  }
+
   /* =========================
      PRICE / SPREAD / TICK UTIL
      - single source of truth for formatting prices
@@ -736,6 +757,7 @@ export class Engine {
 
     // Market closed pehle — warna weekend pe forex bid=0 se "Price not ready" dikhta tha.
     const { sym } = this.assertSymbolTradable(symbol, { requirePrice: true });
+    this.assertVolumeAllowed(sym, volume);
 
     // Run validation for MARKET order (SL/TP vs current market)
     validateOrder({
@@ -1046,6 +1068,7 @@ export class Engine {
 
     if (!account) throw new Error("Invalid trading account");
     if (!sym) throw new Error("Invalid symbol");
+    this.assertVolumeAllowed(sym, volume);
 
     if (
       ![
@@ -1252,6 +1275,7 @@ export class Engine {
 
     if (!(Number(nextVolume) > 0)) throw new Error("Invalid volume");
     if (!(Number(nextOpen) > 0)) throw new Error("Invalid openPrice");
+    this.assertVolumeAllowed(sym, nextVolume);
 
     // validate new SL/TP
     validateOrder({
