@@ -32,9 +32,29 @@ import {
 
 const DEMO_DEFAULT_BALANCE = 10000;
 
-// Oceanaprofx (OCEANAPROFX broker) users: max 3 trading accounts total
+// Oceanaprofx (OCEANAPROFX broker) users: max 3 trading accounts total (default)
 const OCEANAPROFX_BROKER_CODE = "OCEANAPROFX";
 const OCEANAPROFX_MAX_ACCOUNTS = 3;
+
+/** Resolve effective account cap: per-user override, else Oceanaprofx default. */
+export function resolveUserAccountLimit(user, brokerCode) {
+  const override = Number(user?.accountLimit);
+  if (Number.isFinite(override) && override >= 1) {
+    return Math.floor(override);
+  }
+  if (String(brokerCode || "").toUpperCase() === OCEANAPROFX_BROKER_CODE) {
+    return OCEANAPROFX_MAX_ACCOUNTS;
+  }
+  return null;
+}
+
+/** Active accounts only — disabled accounts free a slot toward the limit. */
+export async function countActiveAccountsForUser(userId) {
+  return Account.countDocuments({
+    user_id: userId,
+    status: "active",
+  });
+}
 
 /* =====================================================
    CREATE ACCOUNT
@@ -81,7 +101,9 @@ export async function createAccount({
 
   /* ================= PLAN ================= */
 
-  const userForBroker = await User.findById(userId).select("brokerId").lean();
+  const userForBroker = await User.findById(userId)
+    .select("brokerId accountLimit")
+    .lean();
   const userBrokerId = userForBroker?.brokerId || null;
 
   const plan = await AccountPlan.findOne({
@@ -92,21 +114,17 @@ export async function createAccount({
 
   if (!plan) throw new Error("Invalid plan for this broker");
 
-  /* ================= OCEANAPROFX ACCOUNT LIMIT ================= */
+  /* ================= ACCOUNT LIMIT (per-user override or broker default) ================= */
   if (userBrokerId) {
     const brokerDoc = await Broker.findById(userBrokerId)
       .select("code")
       .lean();
-    if (
-      String(brokerDoc?.code || "").toUpperCase() === OCEANAPROFX_BROKER_CODE
-    ) {
-      const totalAccounts = await Account.countDocuments({
-        user_id: userId,
-      });
-      if (totalAccounts >= OCEANAPROFX_MAX_ACCOUNTS) {
-        throw new Error(
-          `Maximum ${OCEANAPROFX_MAX_ACCOUNTS} trading accounts allowed`,
-        );
+    const brokerCode = String(brokerDoc?.code || "").toUpperCase();
+    const maxAccounts = resolveUserAccountLimit(userForBroker, brokerCode);
+    if (maxAccounts != null) {
+      const activeAccounts = await countActiveAccountsForUser(userId);
+      if (activeAccounts >= maxAccounts) {
+        throw new Error(`Maximum ${maxAccounts} trading accounts allowed`);
       }
     }
   }

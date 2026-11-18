@@ -16,7 +16,11 @@ import Transaction from '../models/Transaction.model.js';
 import Deposit from '../models/Deposit.model.js';
 import Withdrawal from '../models/Withdrawal.model.js';
 import WatchlistItem from '../models/watchlistItem.model.js';
-import { adminDeleteAccountService } from './account.service.js';
+import {
+  adminDeleteAccountService,
+  countActiveAccountsForUser,
+  resolveUserAccountLimit,
+} from './account.service.js';
 import { ibAccessFor } from '../utils/ibAccess.js';
 import BrokerMembership from '../models/BrokerMembership.model.js';
 import Broker from '../models/Broker.model.js';
@@ -584,11 +588,13 @@ export async function adminGetUserProfileService(userId) {
         kycStatus: 1,
         ibDashboardEnabled: 1,
         appLocked: 1,
+        accountLimit: 1,
         wallet_balance: 1,
         wallet_hold_balance: 1,
         createdAt: 1,
         isOnline: 1,
         lastSeenAt: 1,
+        brokerId: 1,
 
         date_of_birth: '$profile.date_of_birth',
         gender: '$profile.gender',
@@ -616,9 +622,29 @@ export async function adminGetUserProfileService(userId) {
     { $group: { _id: null, total: { $sum: '$balance' } } },
   ]);
 
+  const userDoc = result[0];
+  const [accountsCount, totalAccountsCount] = await Promise.all([
+    countActiveAccountsForUser(userId),
+    Account.countDocuments({ user_id: new mongoose.Types.ObjectId(userId) }),
+  ]);
+  const disabledAccountsCount = Math.max(0, totalAccountsCount - accountsCount);
+
+  let brokerCode = null;
+  if (userDoc.brokerId) {
+    const broker = await Broker.findById(userDoc.brokerId).select('code').lean();
+    brokerCode = broker?.code || null;
+  }
+
+  const effectiveAccountLimit = resolveUserAccountLimit(userDoc, brokerCode);
+
   return {
-    ...result[0],
+    ...userDoc,
     trading_balance: Number(tradingAgg?.total || 0),
+    accountsCount,
+    totalAccountsCount,
+    disabledAccountsCount,
+    effectiveAccountLimit,
+    brokerCode,
   };
 }
 

@@ -91,6 +91,13 @@ const userSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Admin-set max trading accounts for this user (null = broker default).
+    accountLimit: {
+      type: Number,
+      default: null,
+      min: 1,
+    },
+
     // User wallet (Oceanaprofx client portal). Available = balance - hold.
     wallet_balance: {
       type: Number,

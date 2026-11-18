@@ -80,8 +80,8 @@ class EngineSync {
   }
 
   /**
-   * Force-refresh account money + restore any OPEN positions / PENDING orders
-   * that are in DB but missing from engine RAM (common after deposit or restart races).
+   * Force-refresh account money + reconcile OPEN positions / PENDING orders
+   * with DB (add missing, drop stale RAM rows closed by another instance/admin).
    */
   static async refreshAccountForLive(accountId) {
     const id = String(accountId || "");
@@ -103,6 +103,31 @@ class EngineSync {
         isDeleted: { $ne: true },
       }).lean(),
     ]);
+
+    const openIds = new Set(
+      openTrades.map((t) => String(t.positionId || "")).filter(Boolean),
+    );
+    const pendingIds = new Set(
+      pendingOrders
+        .map((o) => String(o.orderId || o._id || ""))
+        .filter(Boolean),
+    );
+
+    // Drop RAM positions that are no longer OPEN in Mongo (e.g. closed via
+    // another server/admin against shared DB — Redis pub/sub did not reach us).
+    if (acc.positions?.size) {
+      for (const posId of [...acc.positions.keys()]) {
+        if (openIds.has(String(posId))) continue;
+        acc.positions.delete(posId);
+      }
+    }
+
+    if (acc.pendingOrders?.size) {
+      for (const orderId of [...acc.pendingOrders.keys()]) {
+        if (pendingIds.has(String(orderId))) continue;
+        acc.pendingOrders.delete(orderId);
+      }
+    }
 
     for (const trade of openTrades) {
       const posId = String(trade.positionId || "");

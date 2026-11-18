@@ -4,6 +4,11 @@ import UserDevice from '../models/UserDevice.model.js';
 import { canToggleIbDashboard } from '../utils/ibAccess.js';
 import { adminDeleteUserService, adminGetUserProfileService, adminListUsersService, adminUpdateUserService, getMyProfileService, updateMyProfileService, searchUsersService, healOrphanUsersCreatedByBrokerAdmin, healNullBrokerUsersToDefaultBroker } from '../services/user.service.js';
 import {
+  countActiveAccountsForUser,
+  resolveUserAccountLimit,
+} from '../services/account.service.js';
+import Broker from '../models/Broker.model.js';
+import {
   ACTIVITY_ACTIONS,
   ACTOR_TYPES,
   recordActivity,
@@ -173,6 +178,90 @@ export async function adminUpdateUser(req, res) {
     return res.status(400).json({
       success: false,
       message: err.message
+    });
+  }
+}
+
+/** PATCH /user/admin/:userId/account-limit { limit } — per-user trading account cap. */
+export async function adminSetAccountLimit(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ success: false, message: 'Invalid user id' });
+    }
+
+    const raw = req.body?.limit;
+    const limit = Number(raw);
+    if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'limit must be an integer >= 1',
+      });
+    }
+
+    const filter = {
+      _id: userId,
+      ...(req.brokerId ? { brokerId: req.brokerId } : {}),
+    };
+
+    const existing = await User.findOne(filter).select('_id brokerId accountLimit').lean();
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'User not found in your broker' });
+    }
+
+    const currentCount = await countActiveAccountsForUser(userId);
+    if (limit < currentCount) {
+      return res.status(400).json({
+        success: false,
+        message: `User already has ${currentCount} active account${currentCount === 1 ? '' : 's'}. Limit cannot be set below ${currentCount}. Disable an account first to free a slot.`,
+        data: {
+          currentCount,
+          requestedLimit: limit,
+        },
+      });
+    }
+
+    const user = await User.findOneAndUpdate(
+      filter,
+      { $set: { accountLimit: limit } },
+      { new: true },
+    )
+      .select('_id email accountLimit brokerId')
+      .lean();
+
+    let brokerCode = null;
+    if (user.brokerId) {
+      const broker = await Broker.findById(user.brokerId).select('code').lean();
+      brokerCode = broker?.code || null;
+    }
+
+    recordActivity({
+      userId,
+      action: ACTIVITY_ACTIONS.USER_UPDATED_BY_ADMIN,
+      actorId: req.user?._id || req.user?.id || null,
+      actorType: ACTOR_TYPES.ADMIN,
+      ip: req.ip || req.headers?.['x-forwarded-for'] || null,
+      userAgent: req.headers?.['user-agent'] || null,
+      description: `Account limit set to ${limit}`,
+      targetEntityType: 'user',
+      metadata: { accountLimit: limit, currentCount },
+    }).catch(() => {});
+
+    return res.json({
+      success: true,
+      message: `Account limit updated to ${limit}`,
+      data: {
+        _id: user._id,
+        email: user.email,
+        accountLimit: user.accountLimit,
+        currentCount,
+        effectiveLimit: resolveUserAccountLimit(user, brokerCode),
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'Failed to update account limit',
     });
   }
 }
