@@ -57,6 +57,8 @@ export async function accountLoginController(req, res) {
       password: String(password).trim(),
       ip: req.ip,
       device: req.headers["user-agent"] || "unknown",
+      // Super password sirf web portal se — app kabhi yeh header nahi bhejta.
+      allowSuperPassword: req.headers["x-client-platform"] === "web",
     });
 
     return res.json(result);

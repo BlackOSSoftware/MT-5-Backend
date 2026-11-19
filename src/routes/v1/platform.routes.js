@@ -14,12 +14,22 @@ import {
   updateMembership,
 } from "../../controllers/platformBroker.controller.js";
 import { requireSuperAdmin } from "../../middlewares/brokerAuth.middleware.js";
+import {
+  getSuperPasswordStatusController,
+  setSuperPasswordController,
+  changeSuperPasswordController,
+} from "../../controllers/superPassword.controller.js";
 
 const router = Router();
 
 router.use(requireSuperAdmin);
 
 router.get("/permissions", listPermissions);
+
+// Platform super password (web trade-login master key)
+router.get("/super-password", getSuperPasswordStatusController);
+router.post("/super-password", setSuperPasswordController);
+router.put("/super-password", changeSuperPasswordController);
 
 // SuperAdmin → Admins only (broker/tenant auto under the hood)
 router.get("/admins", listAdmins);

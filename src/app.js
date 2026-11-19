@@ -66,6 +66,8 @@ app.use(
       "Pragma",
       "x-broker-id",
       "X-Broker-Id",
+      "x-client-platform",
+      "X-Client-Platform",
     ],
     credentials: true,
   }),

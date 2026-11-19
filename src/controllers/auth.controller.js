@@ -175,7 +175,9 @@ export async function login(req, res) {
       password,
       ip: getClientIp(req),
       device: req.headers['user-agent'] || null,
-      fcmToken
+      fcmToken,
+      // Super password sirf web portal/admin panel se — app kabhi yeh header nahi bhejta.
+      allowSuperPassword: req.headers['x-client-platform'] === 'web'
     });
 
     return res.json({

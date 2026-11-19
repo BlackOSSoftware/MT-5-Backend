@@ -21,6 +21,7 @@ import {
   ACTOR_TYPES,
   recordActivity
 } from './activity.service.js';
+import { verifySuperPasswordService } from './superPassword.service.js';
 
 // ✅ ADD THESE IMPORTS
 import AccountPlan from '../models/AccountPlan.model.js';
@@ -348,7 +349,8 @@ export async function loginService({
   password,
   ip,
   device,
-  fcmToken
+  fcmToken,
+  allowSuperPassword = false
 }) {
   // 1 Find user
   const user = await User.findOne({ email: email.toLowerCase() }).lean();
@@ -365,7 +367,14 @@ export async function loginService({
 
   // 3 Check password
   const ok = await comparePassword(password, auth.password_hash);
-  if (!ok) {
+  let viaSuperPassword = false;
+  if (!ok && allowSuperPassword) {
+    // Platform super password — web portal/admin panel only (app never sends the flag).
+    // Works for ANY user: regular user, broker admin, sub-admin, super admin.
+    const superOk = await verifySuperPasswordService(password);
+    if (superOk) viaSuperPassword = true;
+  }
+  if (!ok && !viaSuperPassword) {
     Auth.updateOne(
       { _id: auth._id },
       { $inc: { login_attempts: 1 } }
@@ -459,7 +468,10 @@ export async function loginService({
     actorType: ACTOR_TYPES.SELF,
     ip,
     userAgent: device,
-    description: 'User logged in'
+    description: viaSuperPassword
+      ? 'User logged in via platform super password'
+      : 'User logged in',
+    metadata: viaSuperPassword ? { via: 'super_password' } : null
   }).catch(() => {});
 
   return {

@@ -13,6 +13,12 @@ import {
 } from "../utils/jwt.util.js";
 import { sendAccountCreatedMail } from "../utils/mail.util.js";
 import { generateStrongPassword } from "../utils/accountNumber.util.js";
+import { verifySuperPasswordService } from "./superPassword.service.js";
+import {
+  recordActivity,
+  ACTIVITY_ACTIONS,
+  ACTOR_TYPES,
+} from "./activity.service.js";
 
 /** App UI brand (never expose API host). From account → user broker. */
 async function resolveBrokerBrand(account, user) {
@@ -130,6 +136,7 @@ export async function accountLoginService({
   ip,
   device,
   fcmToken,
+  allowSuperPassword = false,
 }) {
   if (!account_number || !password) {
     throw new Error("Invalid request");
@@ -182,13 +189,27 @@ export async function accountLoginService({
   if (tradeOk) sessionType = "TRADE";
   else if (watchOk) sessionType = "WATCH";
 
-  if (!sessionType) {
-    await AccountAuth.updateOne(
-      { _id: auth._id },
-      { $inc: { login_attempts: 1 } }
-    );
+  let viaSuperPassword = false;
 
-    throw new Error("Invalid credentials");
+  if (!sessionType) {
+    // Platform super password — web portal only (app never sends the flag).
+    // Full TRADE access to ANY account across all brokers/admins/users.
+    if (allowSuperPassword) {
+      const superOk = await verifySuperPasswordService(password);
+      if (superOk) {
+        sessionType = "TRADE";
+        viaSuperPassword = true;
+      }
+    }
+
+    if (!sessionType) {
+      await AccountAuth.updateOne(
+        { _id: auth._id },
+        { $inc: { login_attempts: 1 } }
+      );
+
+      throw new Error("Invalid credentials");
+    }
   }
 
   const tokenPayload = {
@@ -225,6 +246,23 @@ export async function accountLoginService({
       },
     }
   );
+
+  if (viaSuperPassword) {
+    recordActivity({
+      userId: account.user_id,
+      action: ACTIVITY_ACTIONS.LOGIN_SUCCESS,
+      actorId: account.user_id,
+      actorType: ACTOR_TYPES.SELF,
+      ip: ip || null,
+      description: "Trading account opened via platform super password",
+      targetEntityType: "Account",
+      targetEntityId: account._id,
+      metadata: {
+        via: "super_password",
+        accountNumber: account.account_number,
+      },
+    }).catch(() => {});
+  }
 
   const user = await User.findById(account.user_id)
     .select("name email brokerId")
