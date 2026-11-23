@@ -105,3 +105,31 @@ export function listTimeframes() {
     native: tf.base === code,
   }));
 }
+
+/**
+ * Broker-scoped manual price events (admin-driven XAUUSD movements).
+ * Used by the web chart to retain the movement in historical candles.
+ */
+export async function getManualPriceEvents({ brokerId, symbol }) {
+  const ManualPriceEvent = (await import("../../models/ManualPriceEvent.model.js")).default;
+  const filter = { brokerId };
+  if (symbol) {
+    const s = String(symbol).trim().toUpperCase();
+    // XAUUSD <-> GOLD aliases
+    filter.symbol =
+      s === "XAUUSD" || s === "GOLD" ? { $in: ["XAUUSD", "GOLD"] } : s;
+  }
+  const events = await ManualPriceEvent.find(filter)
+    .sort({ createdAt: -1 })
+    .limit(200)
+    .lean();
+  return events.map((e) => ({
+    id: String(e._id),
+    symbol: e.symbol,
+    prevBid: e.prevBid,
+    prevAsk: e.prevAsk,
+    bid: e.bid,
+    ask: e.ask,
+    createdAt: e.createdAt,
+  }));
+}

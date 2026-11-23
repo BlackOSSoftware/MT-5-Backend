@@ -1,5 +1,4 @@
 import { Router } from "express";
-import healthRoutes from "./v1/health.routes.js";
 import authRoutes from "./v1/auth.routes.js";
 import paymentRoutes from "./v1/payment.routes.js";
 import notificationRoutes from "./v1/notification.routes.js";
@@ -41,7 +40,6 @@ import slippageRoutes from "./v1/slippage.routes.js";
 const router = Router();
 
 
-router.use("/v1/health", healthRoutes);
 router.use("/v1/platform", platformRoutes);
 router.use("/v1/broker-staff", brokerStaffRoutes);
 router.use("/v1/brokers", brokersRoutes);

@@ -1705,5 +1705,68 @@ export async function handleClientMessage(clientWs, msg) {
 }
 
 // ========================
+// MANUAL PRICE BROADCAST (broker-scoped)
+// Sends an orderbook-shaped tick ONLY to market clients whose bound
+// engine account belongs to the given broker. Other brokers' clients
+// never receive it.
+// ========================
+export function broadcastManualPriceToBroker({ symbol, bid, ask, brokerId }) {
+  const sym = normalizeSymbol(symbol);
+  if (!sym || !brokerId) return { sent: 0 };
+
+  // XAUUSD <-> GOLD aliases so both subscription keys match.
+  const aliases = new Set([sym]);
+  if (sym === "XAUUSD" || sym === "GOLD") {
+    aliases.add("XAUUSD");
+    aliases.add("GOLD");
+  }
+
+  const payload = JSON.stringify({
+    type: "orderbook",
+    market: "metal",
+    data: {
+      code: sym,
+      symbol: sym,
+      bids: [{ price: bid }],
+      asks: [{ price: ask }],
+      manual: true,
+      ts: Date.now(),
+    },
+  });
+
+  let sent = 0;
+  for (const [id, ws] of wsClients.entries()) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) continue;
+    if (!ws.routes || !ws.routes.has("market")) continue;
+
+    // Broker isolation: only clients bound to an account of this broker.
+    const accBroker = ws.engineAccount?.brokerId
+      ? String(ws.engineAccount.brokerId)
+      : null;
+    if (!accBroker || accBroker !== String(brokerId)) continue;
+
+    // Only clients subscribed to this symbol (any alias).
+    const subs = clientSubscriptions.get(id);
+    if (!subs) continue;
+    const subscribed = Array.from(subs).some((key) => {
+      const parts = String(key).split(":");
+      const keySym = normalizeSymbol(parts[parts.length - 1]);
+      return aliases.has(keySym);
+    });
+    if (!subscribed) continue;
+
+    try {
+      ws.send(payload);
+      sent++;
+    } catch (err) {
+      ERROR("[WS SEND ERROR] manual price ->", err && err.message ? err.message : err);
+    }
+  }
+
+  INFO(`manual price ${sym} bid=${bid} ask=${ask} broker=${brokerId} -> ${sent} clients`);
+  return { sent };
+}
+
+// ========================
 // end of file
 // ========================

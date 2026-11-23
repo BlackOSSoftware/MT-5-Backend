@@ -742,6 +742,155 @@ export class Engine {
   }
 
   /* =========================
+     PENDING ORDER MARGIN
+     Pending orders reserve margin so multiple pendings
+     cannot consume the same free margin. Uses the same
+     hedged netting approach as recalcUsedMargin and the
+     same margin formula (price * volume * contractSize / leverage).
+  ========================== */
+
+  /** Effective fill price used for margin: STOP_LIMIT fills at limitPrice. */
+  pendingOrderMarginPrice(order) {
+    if (
+      (order.orderType === "BUY_STOP_LIMIT" ||
+        order.orderType === "SELL_STOP_LIMIT") &&
+      Number.isFinite(Number(order.limitPrice)) &&
+      Number(order.limitPrice) > 0
+    ) {
+      return Number(order.limitPrice);
+    }
+    return Number(order.price);
+  }
+
+  /** Same leverage rule as placeMarketOrder: account leverage capped by symbol max. */
+  pendingOrderLeverage(account, sym) {
+    const accLev = Number(account?.leverage) || 1;
+    const symLev = Number(sym?.maxLeverage) || accLev;
+    const lev = Math.min(accLev, symLev);
+    return Number.isFinite(lev) && lev > 0 ? lev : 1;
+  }
+
+  /**
+   * Total margin reserved by all pending orders of an account.
+   * Nets buy/sell per symbol exactly like recalcUsedMargin does for positions.
+   */
+  pendingReservedMargin(account) {
+    if (!account?.pendingOrders || account.pendingOrders.size === 0) return 0;
+
+    const buckets = new Map();
+
+    for (const order of account.pendingOrders.values()) {
+      const sym = this.symbols.get(order.symbol);
+      const csRaw =
+        sym && typeof sym.contractSize === "number"
+          ? sym.contractSize
+          : null;
+      const contractSize =
+        Number.isFinite(Number(csRaw)) && Number(csRaw) > 0
+          ? Number(csRaw)
+          : 1;
+      const leverage = this.pendingOrderLeverage(account, sym);
+      const price = this.pendingOrderMarginPrice(order);
+      const vol = Number(order.volume) || 0;
+
+      if (!(vol > 0) || !(price > 0)) continue;
+
+      if (!buckets.has(order.symbol)) {
+        buckets.set(order.symbol, {
+          buy: 0,
+          sell: 0,
+          buyNotional: 0,
+          sellNotional: 0,
+          contractSize,
+          leverage,
+        });
+      }
+
+      const b = buckets.get(order.symbol);
+      if (order.side === "BUY") {
+        b.buy += vol;
+        b.buyNotional += vol * price;
+      } else {
+        b.sell += vol;
+        b.sellNotional += vol * price;
+      }
+    }
+
+    let total = 0;
+    for (const b of buckets.values()) {
+      const net = Math.abs(b.buy - b.sell);
+      if (net <= 0) continue;
+
+      const price =
+        b.buy > b.sell
+          ? b.buy > 0
+            ? b.buyNotional / b.buy
+            : 0
+          : b.sell > 0
+            ? b.sellNotional / b.sell
+            : 0;
+
+      if (!Number.isFinite(price) || price <= 0) continue;
+
+      total += (net * b.contractSize * price) / b.leverage;
+    }
+
+    return total;
+  }
+
+  /**
+   * Margin required by a single pending order (standalone, before netting).
+   * Used for the API error message.
+   */
+  pendingOrderRequiredMargin(account, sym, { side, volume, orderType, price, limitPrice }) {
+    const leverage = this.pendingOrderLeverage(account, sym);
+    const csRaw = sym && typeof sym.contractSize === "number" ? sym.contractSize : null;
+    const contractSize =
+      Number.isFinite(Number(csRaw)) && Number(csRaw) > 0 ? Number(csRaw) : 1;
+    const fillPrice =
+      (orderType === "BUY_STOP_LIMIT" || orderType === "SELL_STOP_LIMIT") &&
+      Number.isFinite(Number(limitPrice)) &&
+      Number(limitPrice) > 0
+        ? Number(limitPrice)
+        : Number(price);
+    const vol = Number(volume) || 0;
+
+    if (!(vol > 0) || !(fillPrice > 0)) return 0;
+    return (fillPrice * vol * contractSize) / leverage;
+  }
+
+  /**
+   * Reject a pending order when free margin cannot cover it.
+   * available = freeMarginRaw - margin already reserved by existing pendings.
+   */
+  assertPendingOrderMargin(account, sym, orderSpec) {
+    const required = this.pendingOrderRequiredMargin(account, sym, orderSpec);
+    const reserved = this.pendingReservedMargin(account);
+    const freeRaw = Number(account.freeMarginRaw) || 0;
+    const available = freeRaw - reserved;
+
+    if (required > available + 1e-9) {
+      throw new Error(
+        `Insufficient margin. Required margin: $${required.toFixed(2)}, Available free margin: $${Math.max(0, available).toFixed(2)}.`,
+      );
+    }
+  }
+
+  /**
+   * Revalidate total pending reservation after a modify.
+   * Throws when reserved margin exceeds free margin.
+   */
+  assertPendingMarginAvailable(account) {
+    const reserved = this.pendingReservedMargin(account);
+    const freeRaw = Number(account.freeMarginRaw) || 0;
+    if (reserved > freeRaw + 1e-9) {
+      throw new Error(
+        `Insufficient margin. Pending orders reserve $${reserved.toFixed(2)}, Available free margin: $${Math.max(0, freeRaw).toFixed(2)}.`,
+      );
+    }
+  }
+
+  /* =========================
      MARKET ORDER
      - Added optional overrideOpenPrice to support pending->market transitions
      - Commission charged immediately (deducted from balance)
@@ -1103,6 +1252,16 @@ export class Engine {
       ask: sym.ask,
     });
 
+    // Margin reservation: reject when free margin (minus margin already
+    // reserved by existing pending orders) cannot cover this order.
+    this.assertPendingOrderMargin(account, sym, {
+      side,
+      orderType,
+      price: Number(price),
+      limitPrice: limitPrice !== undefined ? limitPrice : null,
+      volume: Number(volume),
+    });
+
     if (!account.pendingOrders) {
       account.pendingOrders = new Map();
     }
@@ -1203,6 +1362,25 @@ export class Engine {
       bid: sym.bid,
       ask: sym.ask,
     });
+
+    // Margin revalidation: price/volume changes alter the reserved margin.
+    // Apply tentatively, verify total reservation fits free margin, rollback on failure.
+    const marginAffectingChange =
+      typeof price === "number" || typeof volume === "number";
+
+    if (marginAffectingChange) {
+      const prevPrice = order.price;
+      const prevVolume = order.volume;
+      order.price = Number(newPrice);
+      order.volume = Number(newVolume);
+      try {
+        this.assertPendingMarginAvailable(account);
+      } catch (err) {
+        order.price = prevPrice;
+        order.volume = prevVolume;
+        throw err;
+      }
+    }
 
     // Apply updates
     if (typeof price === "number") order.price = price;
@@ -1401,7 +1579,12 @@ export class Engine {
        execute safely (placeMarketOrder first, then ledger enqueue & emits)
   ========================== */
 
-  async onTick(symbol, bid, ask) {
+  async onTick(symbol, bid, ask, options = {}) {
+    // options.brokerId: when set, this is a broker-scoped manual price event —
+    // global symbol prices are NOT touched and only that broker's accounts tick.
+    const scopedBrokerId = options.brokerId ? String(options.brokerId) : null;
+    const updateGlobal = options.updateGlobal !== false;
+
     // Resolve engine symbol even when Alltick code is BTCUSDT and
     // positions use BTCUSD (or the reverse).
     const aliases = instrumentAliases(symbol);
@@ -1420,21 +1603,23 @@ export class Engine {
     if (!sym) return;
 
     const nowTs = Date.now();
-    // keep both raw and public fields on every alias key present in map
-    for (const key of new Set([symbol, ...aliases, ...(sym.code ? [sym.code] : [])])) {
-      const row = this.symbols.get(key);
-      if (!row) continue;
-      row.rawBid = bid;
-      row.rawAsk = ask;
-      row.bid = bid;
-      row.ask = ask;
-      row.lastTickAt = nowTs;
+    if (updateGlobal) {
+      // keep both raw and public fields on every alias key present in map
+      for (const key of new Set([symbol, ...aliases, ...(sym.code ? [sym.code] : [])])) {
+        const row = this.symbols.get(key);
+        if (!row) continue;
+        row.rawBid = bid;
+        row.rawAsk = ask;
+        row.bid = bid;
+        row.ask = ask;
+        row.lastTickAt = nowTs;
+      }
+      sym.rawBid = bid;
+      sym.rawAsk = ask;
+      sym.bid = bid;
+      sym.ask = ask;
+      sym.lastTickAt = nowTs;
     }
-    sym.rawBid = bid;
-    sym.rawAsk = ask;
-    sym.bid = bid;
-    sym.ask = ask;
-    sym.lastTickAt = nowTs;
 
     // If market is closed for this symbol's segment, we keep pending orders pending (no execution),
     // but still emit live price updates so the UI remains responsive.
@@ -1444,6 +1629,11 @@ export class Engine {
     const isMarketOpen = marketStatus?.isMarketOpen === true;
 
     for (const account of this.accounts.values()) {
+      // Broker-scoped manual price event: only that broker's accounts tick.
+      if (scopedBrokerId && String(account.brokerId || "") !== scopedBrokerId) {
+        continue;
+      }
+
       /* =====================
          PENDING ORDERS
       ====================== */
@@ -1726,7 +1916,9 @@ export class Engine {
             ((pos.side === "BUY" && currentPrice <= pos.stopLoss) ||
               (pos.side === "SELL" && currentPrice >= pos.stopLoss))
           ) {
-            this.closePositionInternal(account, pos, "STOP_LOSS", posSym);
+            this.closePositionInternal(account, pos, "STOP_LOSS", posSym, null, {
+              tickPrices: { bid, ask },
+            });
             continue;
           }
 
@@ -1737,7 +1929,9 @@ export class Engine {
             ((pos.side === "BUY" && currentPrice >= pos.takeProfit) ||
               (pos.side === "SELL" && currentPrice <= pos.takeProfit))
           ) {
-            this.closePositionInternal(account, pos, "TAKE_PROFIT", posSym);
+            this.closePositionInternal(account, pos, "TAKE_PROFIT", posSym, null, {
+              tickPrices: { bid, ask },
+            });
           }
         }
       }
@@ -1784,7 +1978,7 @@ export class Engine {
         await RiskManager.checkWarning(account);
 
         if (RiskManager.shouldStopOut(account)) {
-          this.forceCloseAll(account);
+          this.forceCloseAll(account, { bid, ask });
         }
       }
     }
@@ -1800,14 +1994,22 @@ export class Engine {
     reason,
     sym,
     closeTicket = null,
-    { deferLedger = false } = {},
+    { deferLedger = false, tickPrices = null } = {},
   ) {
-    // use per-account formatted prices for PnL and close price
-    let formatted = { bid: sym.bid, ask: sym.ask };
+    // use per-account formatted prices for PnL and close price.
+    // tickPrices: the exact bid/ask of the tick that triggered the close —
+    // required for broker-scoped manual price events where global sym prices
+    // were intentionally not updated.
+    const baseBid = Number(tickPrices?.bid);
+    const baseAsk = Number(tickPrices?.ask);
+    let formatted =
+      Number.isFinite(baseBid) && Number.isFinite(baseAsk) && baseBid > 0 && baseAsk > 0
+        ? { bid: baseBid, ask: baseAsk }
+        : { bid: sym.bid, ask: sym.ask };
     try {
-      formatted = this.formatPrice(account, sym, sym.bid, sym.ask);
+      formatted = this.formatPrice(account, sym, formatted.bid, formatted.ask);
     } catch (err) {
-      formatted = { bid: sym.bid, ask: sym.ask };
+      // keep base prices
     }
 
     pos.updatePnL(formatted.bid, formatted.ask, sym?.contractSize);
@@ -1926,7 +2128,7 @@ export class Engine {
     return closePayload;
   }
 
-  forceCloseWorst(account) {
+  forceCloseWorst(account, tickPrices = null) {
     let worst = null;
 
     for (const pos of account.positions.values()) {
@@ -1939,17 +2141,17 @@ export class Engine {
 
     const sym = this.symbols.get(worst.symbol);
 
-    this.closePositionInternal(account, worst, "STOP_OUT", sym);
+    this.closePositionInternal(account, worst, "STOP_OUT", sym, null, { tickPrices });
   }
 
-  forceCloseAll(account) {
+  forceCloseAll(account, tickPrices = null) {
     const allPositions = Array.from(account.positions.values());
     if (allPositions.length === 0) return;
 
     for (const pos of allPositions) {
       const sym = this.symbols.get(pos.symbol);
       if (!sym) continue;
-      this.closePositionInternal(account, pos, "STOP_OUT", sym);
+      this.closePositionInternal(account, pos, "STOP_OUT", sym, null, { tickPrices });
     }
 
     // Safety: if any position path left bonus behind, clear + persist.

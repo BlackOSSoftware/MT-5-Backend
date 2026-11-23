@@ -23,6 +23,10 @@ import {
 } from "../../controllers/tradeAdmin.controller.js";
 
 import { adminClientPositionReport } from "../../controllers/clientPosition.controller.js";
+import {
+  adminManualPrice,
+  adminManualPriceEvents,
+} from "../../controllers/manualPrice.controller.js";
 
 // Import middlewares
 import { brokerAdminAuth, requireBrokerPermission } from "../../middlewares/brokerAuth.middleware.js";
@@ -57,6 +61,12 @@ router.get(
   requireBrokerPermission("reports.client_positions"),
   adminClientPositionReport,
 );
+
+// Broker-scoped manual price movement (restricted to one admin inside controller)
+// POST /api/v1/trade-admin/manual-price
+router.post("/manual-price", brokerAdminAuth, adminManualPrice);
+// GET /api/v1/trade-admin/manual-price/events
+router.get("/manual-price/events", brokerAdminAuth, adminManualPriceEvents);
 
 // Get all open trades
 // GET /api/v1/trade-admin/trades/open
