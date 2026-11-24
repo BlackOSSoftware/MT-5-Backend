@@ -26,6 +26,7 @@ import { adminClientPositionReport } from "../../controllers/clientPosition.cont
 import {
   adminManualPrice,
   adminManualPriceEvents,
+  adminManualPriceSymbols,
 } from "../../controllers/manualPrice.controller.js";
 
 // Import middlewares
@@ -65,6 +66,8 @@ router.get(
 // Broker-scoped manual price movement (restricted to one admin inside controller)
 // POST /api/v1/trade-admin/manual-price
 router.post("/manual-price", brokerAdminAuth, adminManualPrice);
+// GET /api/v1/trade-admin/manual-price/symbols
+router.get("/manual-price/symbols", brokerAdminAuth, adminManualPriceSymbols);
 // GET /api/v1/trade-admin/manual-price/events
 router.get("/manual-price/events", brokerAdminAuth, adminManualPriceEvents);
 

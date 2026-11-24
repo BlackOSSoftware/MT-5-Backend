@@ -20,6 +20,12 @@ function resolveEngineSymbol(symbol) {
   return null;
 }
 
+/** List all symbols known to the trading engine (for admin symbol picker). */
+function listEngineSymbols() {
+  const keys = tradeEngine.symbols ? Array.from(tradeEngine.symbols.keys()) : [];
+  return keys.map((k) => String(k).toUpperCase()).sort();
+}
+
 function countPositionsForBroker(brokerId, symbol) {
   let checked = 0;
   let open = 0;
@@ -126,3 +132,5 @@ export async function listManualPriceEvents({ brokerId, symbol, limit = 50 }) {
     .lean();
   return events;
 }
+
+export { listEngineSymbols };

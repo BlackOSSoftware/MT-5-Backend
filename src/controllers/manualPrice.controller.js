@@ -1,6 +1,7 @@
 import {
   executeManualPrice,
   listManualPriceEvents,
+  listEngineSymbols,
 } from "../services/manualPrice.service.js";
 
 /**
@@ -60,6 +61,23 @@ export async function adminManualPrice(req, res) {
     return res.status(status).json({
       success: false,
       message: err?.message || "Manual price update failed",
+    });
+  }
+}
+
+/**
+ * GET /api/v1/trade-admin/manual-price/symbols
+ * All symbols known to the trading engine (for the admin symbol picker).
+ */
+export async function adminManualPriceSymbols(req, res) {
+  try {
+    if (!isAllowedAdmin(req)) return forbidden(res);
+    return res.json({ success: true, data: listEngineSymbols() });
+  } catch (err) {
+    console.error("[MANUAL_PRICE] list symbols failed", err);
+    return res.status(500).json({
+      success: false,
+      message: err?.message || "Failed to load symbols",
     });
   }
 }
