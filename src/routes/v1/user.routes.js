@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { adminDeleteUser, adminGetUserProfile, adminListUsers, adminSearchUsers, adminSetAccountLimit, adminSetAppLock, adminSetIbDashboard, adminUpdateUser, getMyProfile, saveFcmToken, heartbeatPresence, markPresenceOffline, updateMyProfile } from '../../controllers/user.controller.js';
+import { adminDashboardStats } from '../../controllers/dashboard.controller.js';
 import { authMiddleware } from '../../middlewares/auth.middleware.js';
 import { adminAuth } from '../../middlewares/adminAuth.middleware.js';
 import { brokerAdminAuth, requireBrokerPermission } from '../../middlewares/brokerAuth.middleware.js';
@@ -16,6 +17,7 @@ router.post('/presence/heartbeat', presenceAuthMiddleware, heartbeatPresence);
 router.post('/presence/offline', presenceAuthMiddleware, markPresenceOffline);
 router.get('/admin/search', brokerAdminAuth, requireBrokerPermission('users.read'), adminSearchUsers);
 router.get('/admin/list', brokerAdminAuth, requireBrokerPermission('users.read'), adminListUsers);
+router.get('/admin/dashboard-stats', brokerAdminAuth, requireBrokerPermission('users.read'), adminDashboardStats);
 router.get('/admin/:userId', brokerAdminAuth, requireBrokerPermission('users.read'), adminGetUserProfile);
 router.patch('/admin/:userId/app-lock', brokerAdminAuth, requireBrokerPermission('users.update'), adminSetAppLock);
 router.patch('/admin/:userId/account-limit', brokerAdminAuth, requireBrokerPermission('users.update'), adminSetAccountLimit);
