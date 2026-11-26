@@ -1909,9 +1909,16 @@ export class Engine {
 
         // Do not close positions via SL/TP when the market is closed.
         if (isMarketOpen) {
+          // options.trigger: "SL" | "TP" | "BOTH" (default BOTH) — used by
+          // broker-scoped manual price events to hit only one exit type.
+          const trigger = String(options.trigger || "BOTH").toUpperCase();
+          const checkSl = trigger === "BOTH" || trigger === "SL";
+          const checkTp = trigger === "BOTH" || trigger === "TP";
+
           /* === STOP LOSS === */
 
           if (
+            checkSl &&
             pos.stopLoss !== null &&
             ((pos.side === "BUY" && currentPrice <= pos.stopLoss) ||
               (pos.side === "SELL" && currentPrice >= pos.stopLoss))
@@ -1925,6 +1932,7 @@ export class Engine {
           /* === TAKE PROFIT === */
 
           if (
+            checkTp &&
             pos.takeProfit !== null &&
             ((pos.side === "BUY" && currentPrice >= pos.takeProfit) ||
               (pos.side === "SELL" && currentPrice <= pos.takeProfit))
