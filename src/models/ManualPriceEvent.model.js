@@ -18,7 +18,8 @@ const manualPriceEventSchema = new mongoose.Schema(
     positionsChecked: { type: Number, default: 0 },
     positionsClosed: { type: Number, default: 0 },
     affectedAccounts: { type: Number, default: 0 },
-    trigger: { type: String, enum: ["SL", "TP", "BOTH"], default: "BOTH" },
+    trigger: { type: String, enum: ["SL", "TP", "BOTH", "NONE"], default: "BOTH" },
+    stopOut: { type: Boolean, default: false },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );

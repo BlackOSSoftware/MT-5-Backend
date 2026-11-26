@@ -1626,7 +1626,12 @@ export class Engine {
     const statusKey =
       aliases.find((a) => this.symbols.has(a)) || symbol;
     const marketStatus = this.getMarketStatusForSymbol(statusKey);
-    const isMarketOpen = marketStatus?.isMarketOpen === true;
+    // Broker-scoped manual price events are admin-forced: evaluate SL/TP,
+    // pending orders and stop-out at the moved price even when the real
+    // market is closed (the chart already shows the moved price via WS).
+    const isManualPrice = options.manual === true;
+    const isMarketOpen =
+      marketStatus?.isMarketOpen === true || isManualPrice;
 
     for (const account of this.accounts.values()) {
       // Broker-scoped manual price event: only that broker's accounts tick.
@@ -1981,8 +1986,13 @@ export class Engine {
          RISK MANAGEMENT
       ====================== */
 
+      // Manual price moves only run stop-out when the admin explicitly
+      // selects it (options.stopOut) — a plain price move must not
+      // auto-liquidate accounts. Real ticks always evaluate risk.
+      const runRiskCheck = !isManualPrice || options.stopOut === true;
+
       // Prevent risk-driven closures (stopout) while the market is closed for this symbol.
-      if (isMarketOpen) {
+      if (isMarketOpen && runRiskCheck) {
         await RiskManager.checkWarning(account);
 
         if (RiskManager.shouldStopOut(account)) {

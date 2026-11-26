@@ -37,7 +37,7 @@ export async function adminManualPrice(req, res) {
       });
     }
 
-    const { symbol, price, trigger } = req.body || {};
+    const { symbol, price, trigger, stopOut } = req.body || {};
     if (!symbol || price === undefined || price === null) {
       return res.status(400).json({
         success: false,
@@ -51,6 +51,7 @@ export async function adminManualPrice(req, res) {
       symbol: String(symbol),
       price,
       trigger,
+      stopOut,
     });
 
     return res.json({ success: true, data: result });

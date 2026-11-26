@@ -50,7 +50,7 @@ function countPositionsForBroker(brokerId, symbol) {
  * - SL/TP/pending evaluation, balance/equity/margin updates and trade
  *   history all go through the existing engine path.
  */
-export async function executeManualPrice({ adminUser, brokerId, symbol, price, trigger }) {
+export async function executeManualPrice({ adminUser, brokerId, symbol, price, trigger, stopOut }) {
   const engineSymbol = resolveEngineSymbol(symbol);
   if (!engineSymbol) {
     throw Object.assign(new Error("Symbol not available in trading engine"), { status: 400 });
@@ -62,9 +62,11 @@ export async function executeManualPrice({ adminUser, brokerId, symbol, price, t
   }
 
   const triggerMode = String(trigger || "BOTH").toUpperCase();
-  if (!["SL", "TP", "BOTH"].includes(triggerMode)) {
-    throw Object.assign(new Error("Invalid trigger — use SL, TP or BOTH"), { status: 400 });
+  if (!["SL", "TP", "BOTH", "NONE"].includes(triggerMode)) {
+    throw Object.assign(new Error("Invalid trigger — use SL, TP, BOTH or NONE"), { status: 400 });
   }
+
+  const stopOutEnabled = stopOut === true;
 
   const sym = tradeEngine.symbols.get(engineSymbol);
   const prevBid = Number(sym?.bid ?? sym?.rawBid) || null;
@@ -78,6 +80,8 @@ export async function executeManualPrice({ adminUser, brokerId, symbol, price, t
     brokerId: String(brokerId),
     updateGlobal: false,
     trigger: triggerMode,
+    manual: true,
+    stopOut: stopOutEnabled,
   });
 
   const after = countPositionsForBroker(brokerId, engineSymbol);
@@ -97,6 +101,7 @@ export async function executeManualPrice({ adminUser, brokerId, symbol, price, t
     positionsClosed,
     affectedAccounts: affectedAccounts.size,
     trigger: triggerMode,
+    stopOut: stopOutEnabled,
   });
 
   // Web chart live update — only this broker's clients.
